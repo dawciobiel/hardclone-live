@@ -102,19 +102,16 @@ jobs:
         # Disk and filesystem tools
         parted
         gparted
-        lsblk
         e2fsprogs
         xfsprogs
         btrfs-progs
         ntfs-3g
         exfat-fuse
-        exfat-utils
         dosfstools
         gddrescue
         partclone
         clonezilla
         fsarchiver
-        losetup
         kpartx
 
         # Archive and compression tools
@@ -137,7 +134,6 @@ jobs:
         smartmontools
         hdparm
         fio
-        badblocks
 
         # Development tools
         python3
@@ -154,8 +150,7 @@ jobs:
         rkhunter
         clamav
 
-        # Core system tools (usually pre-installed but ensuring availability)
-        coreutils
+        # Core system tools (these provide the missing commands)
         util-linux
         procps
         mount
@@ -163,7 +158,7 @@ jobs:
 
         # Verify packages exist (optional check)
         echo "Verifying package availability..."
-        packages=(mc glances iotop iftop ncdu sysstat lsof strace parted gparted lsblk e2fsprogs xfsprogs btrfs-progs ntfs-3g exfat-fuse exfat-utils dosfstools gddrescue partclone clonezilla fsarchiver losetup kpartx rsync tar gzip xz-utils zip p7zip-full p7zip-rar openssh-client openssh-server net-tools iproute2 nmap smartmontools hdparm fio badblocks python3 make gcc build-essential gpg file testdisk sleuthkit chkrootkit rkhunter clamav)
+        packages=(mc glances iotop iftop ncdu sysstat lsof strace parted gparted e2fsprogs xfsprogs btrfs-progs ntfs-3g exfat-fuse dosfstools gddrescue partclone clonezilla fsarchiver kpartx rsync tar gzip xz-utils zip p7zip-full p7zip-rar openssh-client openssh-server net-tools iproute2 nmap smartmontools hdparm fio python3 make gcc build-essential gpg file testdisk sleuthkit chkrootkit rkhunter clamav util-linux procps mount)
 
         for pkg in "${packages[@]}"; do
           if apt-cache show "$pkg" >/dev/null 2>&1; then
