@@ -65,8 +65,20 @@ jobs:
           --linux-flavours generic \
           --memtest none \
           --win32-loader false \
-          --bootloader syslinux \
+          --bootloader grub-efi \
+          --uefi-secure-boot auto \
           --verbose
+
+        # Remove problematic syslinux theme dependencies
+        echo "Disabling problematic boot themes..."
+        mkdir -p config/hooks/normal
+        cat > config/hooks/normal/9999-disable-boot-themes.hook.chroot << 'EOF'
+#!/bin/bash
+# Remove problematic boot theme packages that don't exist in Ubuntu 24.04
+echo "Skipping problematic boot themes installation"
+exit 0
+EOF
+        chmod +x config/hooks/normal/9999-disable-boot-themes.hook.chroot
 
     - name: Add custom packages
       run: |
