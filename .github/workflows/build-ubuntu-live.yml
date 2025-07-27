@@ -62,8 +62,9 @@ jobs:
           --bootappend-live "boot=live components username=live hostname=ubuntu-live" \
           --debian-installer false \
           --linux-flavours generic \
-          --memtest memtest86+ \
+          --memtest none \
           --win32-loader false \
+          --bootloader grub-efi \
           --verbose
 
     - name: Add custom packages
