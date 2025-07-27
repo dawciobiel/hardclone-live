@@ -1,2 +1,6 @@
 # Cache, Docker, Output folders
 
+# Logs
+logs/
+
+
