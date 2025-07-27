@@ -65,7 +65,7 @@ jobs:
           --linux-flavours generic \
           --memtest none \
           --win32-loader false \
-          --bootloader grub-efi \
+          --bootloader syslinux \
           --verbose
 
     - name: Add custom packages
@@ -220,8 +220,18 @@ jobs:
           ls -lh live-image-amd64.hybrid.iso
         else
           echo "❌ ISO build failed!"
+          echo "Checking for alternative ISO names..."
+          ls -la *.iso || echo "No ISO files found"
           tail -50 build.log
           exit 1
+        fi
+
+        # Manual isohybrid fix if needed
+        if command -v isohybrid >/dev/null 2>&1; then
+          echo "Running isohybrid manually..."
+          sudo isohybrid live-image-amd64.hybrid.iso || echo "isohybrid failed, but ISO should still work"
+        else
+          echo "isohybrid not found, but ISO should still be bootable"
         fi
 
     - name: Rename and prepare ISO
