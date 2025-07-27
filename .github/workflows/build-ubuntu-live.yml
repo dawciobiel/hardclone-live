@@ -37,6 +37,7 @@ jobs:
           xorriso \
           isolinux \
           syslinux-efi \
+          syslinux-utils \
           memtest86+ \
           grub-pc-bin \
           grub-efi-amd64-bin \
