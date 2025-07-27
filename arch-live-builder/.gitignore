@@ -1,0 +1,5 @@
+# Cache, Docker, Output folders
+archiso_work/
+imaging-distro/
+hardclone-arch/
+
