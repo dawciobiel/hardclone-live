@@ -11,11 +11,11 @@ on:
 jobs:
   build-iso:
     runs-on: ubuntu-24.04
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      
+
     - name: Free up disk space
       run: |
         # Remove unnecessary packages to free up space
@@ -23,10 +23,10 @@ jobs:
         sudo apt-get remove -y azure-cli google-chrome-stable firefox powershell mono-devel
         sudo apt-get autoremove -y
         sudo apt-get clean
-        
+
         # Show available space
         df -h
-        
+
     - name: Install build dependencies
       run: |
         sudo apt-get update
@@ -42,16 +42,16 @@ jobs:
           grub-efi-amd64-bin \
           mtools \
           dosfstools
-          
+
     - name: Create build directory
       run: |
         mkdir -p live-build
         cd live-build
-        
+
     - name: Configure live-build
       run: |
         cd live-build
-        
+
         # Basic configuration
         lb config \
           --distribution noble \
@@ -65,11 +65,11 @@ jobs:
           --memtest memtest86+ \
           --win32-loader false \
           --verbose
-          
+
     - name: Add custom packages
       run: |
         cd live-build
-        
+
         # Add additional packages for installation
         cat > config/package-lists/custom.list.chroot << EOF
         # Basic tools
@@ -81,30 +81,103 @@ jobs:
         htop
         tree
         unzip
-        
+        mc
+        tmux
+        screen
+        bash-completion
+
         # Desktop environment (optional - remove if you want terminal only)
         ubuntu-desktop-minimal
         firefox
-        
-        # System tools
+
+        # System monitoring and utilities
+        glances
+        iotop
+        iftop
+        ncdu
+        sysstat
+        lsof
+        strace
+
+        # Disk and filesystem tools
+        parted
         gparted
-        fsarchiver
+        lsblk
+        e2fsprogs
+        xfsprogs
+        btrfs-progs
+        ntfs-3g
+        exfat-fuse
+        exfat-utils
+        dosfstools
+        gddrescue
         partclone
-        ddrescue
-        testdisk
-        
+        clonezilla
+        fsarchiver
+        losetup
+        kpartx
+
+        # Archive and compression tools
+        rsync
+        tar
+        gzip
+        xz-utils
+        zip
+        p7zip-full
+        p7zip-rar
+
         # Network tools
         openssh-client
+        openssh-server
         net-tools
-        wireless-tools
-        wpasupplicant
+        iproute2
+        nmap
+
+        # Hardware monitoring
+        smartmontools
+        hdparm
+        fio
+        badblocks
+
+        # Development tools
+        python3
+        make
+        gcc
+        build-essential
+        gpg
+        file
+
+        # Security and forensics
+        testdisk
+        sleuthkit
+        chkrootkit
+        rkhunter
+        clamav
+
+        # Core system tools (usually pre-installed but ensuring availability)
+        coreutils
+        util-linux
+        procps
+        mount
         EOF
-        
+
+        # Verify packages exist (optional check)
+        echo "Verifying package availability..."
+        packages=(mc glances iotop iftop ncdu sysstat lsof strace parted gparted lsblk e2fsprogs xfsprogs btrfs-progs ntfs-3g exfat-fuse exfat-utils dosfstools gddrescue partclone clonezilla fsarchiver losetup kpartx rsync tar gzip xz-utils zip p7zip-full p7zip-rar openssh-client openssh-server net-tools iproute2 nmap smartmontools hdparm fio badblocks python3 make gcc build-essential gpg file testdisk sleuthkit chkrootkit rkhunter clamav)
+
+        for pkg in "${packages[@]}"; do
+          if apt-cache show "$pkg" >/dev/null 2>&1; then
+            echo "✅ $pkg - available"
+          else
+            echo "❌ $pkg - NOT FOUND (may need different name or repository)"
+          fi
+        done
+
     - name: Add custom configurations
       run: |
         cd live-build
         mkdir -p config/includes.chroot/etc/skel
-        
+
         # Add custom bashrc
         cat > config/includes.chroot/etc/skel/.bashrc << 'EOF'
         # Custom bashrc for Live system
@@ -112,11 +185,11 @@ jobs:
         alias ll='ls -alF'
         alias la='ls -A'
         alias l='ls -CF'
-        
+
         echo "Welcome to Ubuntu Live System!"
         echo "Build date: $(date)"
         EOF
-        
+
         # Add welcome script
         mkdir -p config/includes.chroot/usr/local/bin
         cat > config/includes.chroot/usr/local/bin/welcome << 'EOF'
@@ -129,13 +202,13 @@ jobs:
         echo "========================================="
         EOF
         chmod +x config/includes.chroot/usr/local/bin/welcome
-        
+
     - name: Build ISO image
       run: |
         cd live-build
         echo "Starting ISO build process..."
         sudo lb build 2>&1 | tee build.log
-        
+
         # Check if build was successful
         if [ -f live-image-amd64.hybrid.iso ]; then
           echo "✅ ISO build successful!"
@@ -145,19 +218,19 @@ jobs:
           tail -50 build.log
           exit 1
         fi
-        
+
     - name: Rename and prepare ISO
       run: |
         cd live-build
         TIMESTAMP=$(date +%Y%m%d-%H%M)
         mv live-image-amd64.hybrid.iso "ubuntu-live-custom-${TIMESTAMP}.iso"
-        
+
         # Generate checksum
         sha256sum "ubuntu-live-custom-${TIMESTAMP}.iso" > "ubuntu-live-custom-${TIMESTAMP}.iso.sha256"
-        
+
         echo "Final ISO details:"
         ls -lh *.iso*
-        
+
     - name: Upload ISO as artifact
       uses: actions/upload-artifact@v4
       with:
@@ -167,7 +240,7 @@ jobs:
           live-build/*.sha256
           live-build/build.log
         retention-days: 30
-        
+
     - name: Create release (on tag)
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
