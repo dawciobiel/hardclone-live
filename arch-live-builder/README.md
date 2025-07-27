@@ -1,2 +1,2 @@
 # hardclone-live
-Repository with live Linux distribution
+Repository with live Linux distribution based on Arch
