@@ -1,0 +1,179 @@
+# .github/workflows/build-ubuntu-live.yml
+name: Build Ubuntu Live ISO
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Allows manual trigger
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-24.04
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Free up disk space
+      run: |
+        # Remove unnecessary packages to free up space
+        sudo apt-get remove -y '^dotnet-.*' '^llvm-.*' '^mongodb-.*' '^mysql-.*'
+        sudo apt-get remove -y azure-cli google-chrome-stable firefox powershell mono-devel
+        sudo apt-get autoremove -y
+        sudo apt-get clean
+        
+        # Show available space
+        df -h
+        
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          live-build \
+          debootstrap \
+          squashfs-tools \
+          xorriso \
+          isolinux \
+          syslinux-efi \
+          memtest86+ \
+          grub-pc-bin \
+          grub-efi-amd64-bin \
+          mtools \
+          dosfstools
+          
+    - name: Create build directory
+      run: |
+        mkdir -p live-build
+        cd live-build
+        
+    - name: Configure live-build
+      run: |
+        cd live-build
+        
+        # Basic configuration
+        lb config \
+          --distribution noble \
+          --archive-areas "main restricted universe multiverse" \
+          --mode ubuntu \
+          --system live \
+          --binary-images iso-hybrid \
+          --bootappend-live "boot=live components username=live hostname=ubuntu-live" \
+          --debian-installer false \
+          --linux-flavours generic \
+          --memtest memtest86+ \
+          --win32-loader false \
+          --verbose
+          
+    - name: Add custom packages
+      run: |
+        cd live-build
+        
+        # Add additional packages for installation
+        cat > config/package-lists/custom.list.chroot << EOF
+        # Basic tools
+        curl
+        wget
+        git
+        vim
+        nano
+        htop
+        tree
+        unzip
+        
+        # Desktop environment (optional - remove if you want terminal only)
+        ubuntu-desktop-minimal
+        firefox
+        
+        # System tools
+        gparted
+        fsarchiver
+        partclone
+        ddrescue
+        testdisk
+        
+        # Network tools
+        openssh-client
+        net-tools
+        wireless-tools
+        wpasupplicant
+        EOF
+        
+    - name: Add custom configurations
+      run: |
+        cd live-build
+        mkdir -p config/includes.chroot/etc/skel
+        
+        # Add custom bashrc
+        cat > config/includes.chroot/etc/skel/.bashrc << 'EOF'
+        # Custom bashrc for Live system
+        export PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+        alias ll='ls -alF'
+        alias la='ls -A'
+        alias l='ls -CF'
+        
+        echo "Welcome to Ubuntu Live System!"
+        echo "Build date: $(date)"
+        EOF
+        
+        # Add welcome script
+        mkdir -p config/includes.chroot/usr/local/bin
+        cat > config/includes.chroot/usr/local/bin/welcome << 'EOF'
+        #!/bin/bash
+        echo "========================================="
+        echo "    Ubuntu Live System - Ready to use   "
+        echo "========================================="
+        echo "Username: live (no password required)"
+        echo "To become root: sudo su"
+        echo "========================================="
+        EOF
+        chmod +x config/includes.chroot/usr/local/bin/welcome
+        
+    - name: Build ISO image
+      run: |
+        cd live-build
+        echo "Starting ISO build process..."
+        sudo lb build 2>&1 | tee build.log
+        
+        # Check if build was successful
+        if [ -f live-image-amd64.hybrid.iso ]; then
+          echo "✅ ISO build successful!"
+          ls -lh live-image-amd64.hybrid.iso
+        else
+          echo "❌ ISO build failed!"
+          tail -50 build.log
+          exit 1
+        fi
+        
+    - name: Rename and prepare ISO
+      run: |
+        cd live-build
+        TIMESTAMP=$(date +%Y%m%d-%H%M)
+        mv live-image-amd64.hybrid.iso "ubuntu-live-custom-${TIMESTAMP}.iso"
+        
+        # Generate checksum
+        sha256sum "ubuntu-live-custom-${TIMESTAMP}.iso" > "ubuntu-live-custom-${TIMESTAMP}.iso.sha256"
+        
+        echo "Final ISO details:"
+        ls -lh *.iso*
+        
+    - name: Upload ISO as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ubuntu-live-iso
+        path: |
+          live-build/*.iso
+          live-build/*.sha256
+          live-build/build.log
+        retention-days: 30
+        
+    - name: Create release (on tag)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          live-build/*.iso
+          live-build/*.sha256
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
