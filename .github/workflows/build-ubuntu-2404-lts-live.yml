@@ -1,0 +1,232 @@
+# .github/workflows/build-ubuntu-live.yml
+name: Build Ubuntu Live ISO
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Allows manual trigger
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Free up disk space
+      run: |
+        # Remove unnecessary packages to free up space
+        sudo apt-get remove -y '^dotnet-.*' '^llvm-.*' '^mongodb-.*' '^mysql-.*'
+        sudo apt-get remove -y azure-cli google-chrome-stable firefox powershell mono-devel
+        sudo apt-get autoremove -y
+        sudo apt-get clean
+        # Show available space
+        df -h
+
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          live-build \
+          debootstrap \
+          squashfs-tools \
+          xorriso \
+          isolinux \
+          syslinux-efi \
+          syslinux-utils \
+          memtest86+ \
+          grub-pc-bin \
+          grub-efi-amd64-bin \
+          mtools \
+          dosfstools
+
+    - name: Create build directory
+      run: |
+        mkdir -p live-build
+        cd live-build
+
+    - name: Configure live-build
+      run: |
+        cd live-build
+        # Basic configuration
+        lb config \
+          --distribution noble \
+          --archive-areas "main restricted universe multiverse" \
+          --mode ubuntu \
+          --system live \
+          --binary-images iso-hybrid \
+          --bootappend-live "boot=live components username=live hostname=ubuntu-live" \
+          --debian-installer false \
+          --linux-flavours generic \
+          --memtest none \
+          --win32-loader false \
+          --bootloader grub-efi \
+          --verbose
+        # Remove problematic syslinux theme dependencies
+        echo "Disabling problematic boot themes..."
+        mkdir -p config/hooks/normal
+        cat > config/hooks/normal/9999-disable-boot-themes.hook.chroot << 'HOOK_EOF'
+        #!/bin/bash
+        # Remove problematic boot theme packages that don't exist in Ubuntu 24.04
+        echo "Skipping problematic boot themes installation"
+        exit 0
+        HOOK_EOF
+        chmod +x config/hooks/normal/9999-disable-boot-themes.hook.chroot
+
+    - name: Add custom packages
+      run: |
+        cd live-build
+        # Add additional packages for installation
+        cat > config/package-lists/custom.list.chroot << 'PACKAGES_EOF'
+        curl
+        wget
+        git
+        vim
+        nano
+        htop
+        tree
+        unzip
+        mc
+        tmux
+        screen
+        bash-completion
+        ubuntu-desktop-minimal
+        firefox
+        thunar
+        baobab
+        filelight
+        remmina
+        glances
+        iotop
+        iftop
+        ncdu
+        sysstat
+        lsof
+        strace
+        parted
+        gparted
+        e2fsprogs
+        xfsprogs
+        btrfs-progs
+        ntfs-3g
+        exfat-fuse
+        dosfstools
+        gddrescue
+        partclone
+        clonezilla
+        fsarchiver
+        kpartx
+        rsync
+        tar
+        gzip
+        xz-utils
+        zip
+        p7zip-full
+        p7zip-rar
+        openssh-client
+        openssh-server
+        net-tools
+        iproute2
+        nmap
+        smartmontools
+        hdparm
+        fio
+        python3
+        make
+        gcc
+        build-essential
+        gpg
+        file
+        testdisk
+        sleuthkit
+        chkrootkit
+        rkhunter
+        clamav
+        util-linux
+        procps
+        mount
+        PACKAGES_EOF
+
+    - name: Add custom configurations
+      run: |
+        cd live-build
+        mkdir -p config/includes.chroot/etc/skel
+        # Add custom bashrc
+        cat > config/includes.chroot/etc/skel/.bashrc << 'BASHRC_EOF'
+        # Custom bashrc for Live system
+        export PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+        alias ll='ls -alF'
+        alias la='ls -A'
+        alias l='ls -CF'
+        echo "Welcome to Ubuntu Live System!"
+        echo "Build date: $(date)"
+        BASHRC_EOF
+        # Add welcome script
+        mkdir -p config/includes.chroot/usr/local/bin
+        cat > config/includes.chroot/usr/local/bin/welcome << 'WELCOME_EOF'
+        #!/bin/bash
+        echo "========================================="
+        echo "    Ubuntu Live System - Ready to use   "
+        echo "========================================="
+        echo "Username: live (no password required)"
+        echo "To become root: sudo su"
+        echo "========================================="
+        WELCOME_EOF
+        chmod +x config/includes.chroot/usr/local/bin/welcome
+
+    - name: Build ISO image
+      run: |
+        cd live-build
+        echo "Starting ISO build process..."
+        sudo lb build 2>&1 | tee build.log
+        # Check if build was successful
+        if [ -f live-image-amd64.hybrid.iso ]; then
+          echo "✅ ISO build successful!"
+          ls -lh live-image-amd64.hybrid.iso
+        else
+          echo "❌ ISO build failed!"
+          echo "Checking for alternative ISO names..."
+          ls -la *.iso || echo "No ISO files found"
+          tail -50 build.log
+          exit 1
+        fi
+        # Manual isohybrid fix if needed
+        if command -v isohybrid >/dev/null 2>&1; then
+          echo "Running isohybrid manually..."
+          sudo isohybrid live-image-amd64.hybrid.iso || echo "isohybrid failed, but ISO should still work"
+        else
+          echo "isohybrid not found, but ISO should still be bootable"
+        fi
+
+    - name: Rename and prepare ISO
+      run: |
+        cd live-build
+        TIMESTAMP=$(date +%Y%m%d-%H%M)
+        mv live-image-amd64.hybrid.iso "ubuntu-live-custom-${TIMESTAMP}.iso"
+        # Generate checksum
+        sha256sum "ubuntu-live-custom-${TIMESTAMP}.iso" > "ubuntu-live-custom-${TIMESTAMP}.iso.sha256"
+        echo "Final ISO details:"
+        ls -lh *.iso*
+
+    - name: Upload ISO as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ubuntu-live-iso
+        path: |
+          live-build/*.iso
+          live-build/*.sha256
+          live-build/build.log
+        retention-days: 30
+
+    - name: Create release (on tag)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          live-build/*.iso
+          live-build/*.sha256
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
