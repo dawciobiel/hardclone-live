@@ -1,4 +1,4 @@
-name: Build Ubuntu 24.04 Live ISO with KDE
+name: Build Ubuntu 24.04 Live ISO
 
 on:
   workflow_dispatch:
@@ -6,90 +6,74 @@ on:
 jobs:
   build-live-iso:
     runs-on: ubuntu-latest
-    container: ubuntu:24.04
 
     steps:
-      - name: Install required tools
+      - name: Checkout (optional)
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
         run: |
-          apt update
-          DEBIAN_FRONTEND=noninteractive apt install -y \
-            debootstrap \
-            xorriso \
-            squashfs-tools \
-            grub-pc-bin \
-            grub-efi-amd64-bin \
-            mtools \
-            dosfstools \
-            isolinux \
-            syslinux-utils \
-            wget \
-            sudo \
-            rsync \
-            systemd-sysv
+          sudo apt-get update
+          sudo apt-get install -y \
+            debootstrap squashfs-tools xorriso grub-pc-bin grub-efi-amd64-bin mtools \
+            dosfstools isolinux syslinux-common syslinux-utils
 
       - name: Create working directories
         run: |
           mkdir -p ~/live-build/{chroot,iso}
 
-      - name: Bootstrap Ubuntu 24.04 (noble)
+      - name: Bootstrap Ubuntu 24.04 LTS
         run: |
-          debootstrap --arch=amd64 noble ~/live-build/chroot http://archive.ubuntu.com/ubuntu/
+          sudo debootstrap --arch=amd64 noble ~/live-build/chroot http://archive.ubuntu.com/ubuntu/
 
-      - name: Configure chroot (KDE + live user)
+      - name: Configure chroot system
         run: |
-          echo '#!/bin/bash' > ~/live-build/chroot/customize.sh
-          echo 'export DEBIAN_FRONTEND=noninteractive' >> ~/live-build/chroot/customize.sh
-          echo 'apt update' >> ~/live-build/chroot/customize.sh
-          echo 'apt install -y ubuntu-standard casper network-manager sudo kde-plasma-desktop sddm xinit' >> ~/live-build/chroot/customize.sh
-          echo 'useradd -m -s /bin/bash liveuser' >> ~/live-build/chroot/customize.sh
-          echo 'echo "liveuser:live" | chpasswd' >> ~/live-build/chroot/customize.sh
-          echo 'usermod -aG sudo liveuser' >> ~/live-build/chroot/customize.sh
-          echo 'mkdir -p /etc/sddm.conf.d' >> ~/live-build/chroot/customize.sh
-          echo 'echo "[Autologin]" > /etc/sddm.conf.d/autologin.conf' >> ~/live-build/chroot/customize.sh
-          echo 'echo "User=liveuser" >> /etc/sddm.conf.d/autologin.conf' >> ~/live-build/chroot/customize.sh
-          echo 'echo "Session=plasma.desktop" >> /etc/sddm.conf.d/autologin.conf' >> ~/live-build/chroot/customize.sh
-          echo 'systemctl enable sddm' >> ~/live-build/chroot/customize.sh
-          echo 'apt clean' >> ~/live-build/chroot/customize.sh
+          sudo mount --bind /dev ~/live-build/chroot/dev
+          sudo cp /etc/resolv.conf ~/live-build/chroot/etc/
 
-          chmod +x ~/live-build/chroot/customize.sh
-          mount --bind /dev ~/live-build/chroot/dev
-          chroot ~/live-build/chroot /customize.sh
-          umount ~/live-build/chroot/dev
-          rm ~/live-build/chroot/customize.sh
+          sudo chroot ~/live-build/chroot /bin/bash -c "
+            apt-get update
+            apt-get install -y ubuntu-standard casper lupin-casper discover laptop-detect os-prober network-manager net-tools \
+              locales sudo systemd-sysv plymouth \
+              xorg lightdm firefox \
+              kde-plasma-desktop
+            echo 'live ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/live
+            useradd -m -s /bin/bash live
+            passwd -d live
+            locale-gen en_US.UTF-8
+            echo 'ubuntu-live' > /etc/hostname
+            echo 'LANG=en_US.UTF-8' > /etc/default/locale
+          "
 
-      - name: Prepare ISO structure
+          sudo umount ~/live-build/chroot/dev
+
+      - name: Create squashfs
         run: |
-          mkdir -p ~/live-build/iso/{casper,boot/grub,isolinux}
-          cp /usr/lib/ISOLINUX/isolinux.bin ~/live-build/iso/isolinux/
-          cp /usr/lib/syslinux/modules/bios/* ~/live-build/iso/isolinux/
-          mksquashfs ~/live-build/chroot ~/live-build/iso/casper/filesystem.squashfs -e boot
-
-          echo "ubuntu 24.04 live" > ~/live-build/iso/README.diskdefines
-          echo "casper" > ~/live-build/iso/casper/ubuntu.version
-          touch ~/live-build/iso/casper/filesystem.manifest
-          touch ~/live-build/iso/casper/filesystem.size
+          sudo mksquashfs ~/live-build/chroot ~/live-build/iso/casper/filesystem.squashfs -e boot
 
       - name: Copy kernel and initrd
         run: |
-          cp ~/live-build/chroot/boot/vmlinuz-* ~/live-build/iso/casper/vmlinuz
-          cp ~/live-build/chroot/boot/initrd.img-* ~/live-build/iso/casper/initrd
+          sudo cp ~/live-build/chroot/boot/vmlinuz* ~/live-build/iso/casper/vmlinuz
+          sudo cp ~/live-build/chroot/boot/initrd.img* ~/live-build/iso/casper/initrd
 
-      - name: Generate GRUB config
+      - name: Write grub config
         run: |
           mkdir -p ~/live-build/iso/boot/grub
-          echo "set timeout=5" > ~/live-build/iso/boot/grub/grub.cfg
-          echo "menuentry 'Ubuntu 24.04 Live KDE' {" >> ~/live-build/iso/boot/grub/grub.cfg
-          echo "    linux /casper/vmlinuz boot=casper quiet splash ---" >> ~/live-build/iso/boot/grub/grub.cfg
-          echo "    initrd /casper/initrd" >> ~/live-build/iso/boot/grub/grub.cfg
-          echo "}" >> ~/live-build/iso/boot/grub/grub.cfg
+          cat <<EOF > ~/live-build/iso/boot/grub/grub.cfg
+          set timeout=10
+          menuentry "Try Ubuntu 24.04 Live (KDE)" {
+              linux /casper/vmlinuz boot=casper quiet splash ---
+              initrd /casper/initrd
+          }
+EOF
 
       - name: Create the ISO
         run: |
-          grub-mkrescue -o ~/ubuntu-24.04-live-kde.iso ~/live-build/iso || \
+          grub-mkrescue -o ubuntu-24.04-live.iso ~/live-build/iso || \
             echo "Skipping isohybrid - ISO will still be bootable"
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ubuntu-24.04-live-kde
-          path: ~/ubuntu-24.04-live-kde.iso
+          name: ubuntu-24.04-live
+          path: ubuntu-24.04-live.iso
