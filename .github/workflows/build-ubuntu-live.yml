@@ -37,6 +37,7 @@ jobs:
           isolinux \
           syslinux-efi \
           syslinux-utils \
+          syslinux-common \
           memtest86+ \
           grub-pc-bin \
           grub-efi-amd64-bin \
@@ -63,11 +64,31 @@ jobs:
           --linux-flavours generic \
           --memtest none \
           --win32-loader false \
-          --bootloader grub-efi \
+          --bootloaders syslinux \
           --verbose
-        # Remove problematic syslinux theme dependencies
-        echo "Disabling problematic boot themes..."
-        mkdir -p config/hooks/normal
+        # Ensure bootloader files are present
+        echo "Checking bootloader configuration..."
+        mkdir -p config/bootloaders
+        
+        # Force syslinux configuration
+        echo "Setting up syslinux bootloader..."
+        mkdir -p config/bootloaders/syslinux
+        
+        # Basic syslinux config
+        cat > config/bootloaders/syslinux/syslinux.cfg << 'SYSLINUX_EOF'
+default live
+timeout 30
+
+label live
+  menu label ^Ubuntu Live
+  kernel /live/vmlinuz
+  append initrd=/live/initrd.img boot=live components username=live hostname=ubuntu-live
+
+label live-failsafe
+  menu label Ubuntu Live (failsafe)
+  kernel /live/vmlinuz
+  append initrd=/live/initrd.img boot=live components username=live hostname=ubuntu-live noapic noapm nodma nomce nolapic nomodeset nosmp nosplash vga=normal
+SYSLINUX_EOF
         cat > config/hooks/normal/9999-disable-boot-themes.hook.chroot << 'HOOK_EOF'
         #!/bin/bash
         # Remove problematic boot theme packages that don't exist in Ubuntu 24.04
@@ -180,7 +201,23 @@ jobs:
     - name: Build ISO image
       run: |
         cd live-build
-        echo "Starting ISO build process..."
+        # Check if bootloader was properly configured
+        echo "=== Checking bootloader configuration ==="
+        if [ -d binary/isolinux ]; then
+          echo "✅ isolinux directory found"
+          ls -la binary/isolinux/
+        else
+          echo "❌ No isolinux directory - bootloader problem!"
+        fi
+        
+        if [ -d binary/boot ]; then
+          echo "✅ boot directory found"
+          find binary/boot -name "*.bin" -o -name "*.img" | head -5
+        else
+          echo "❌ No boot directory found"
+        fi
+        
+        echo "=== Build completed, checking results ==="
         sudo lb build 2>&1 | tee build.log
         # Check if build was successful - comprehensive search
         echo "=== DEBUG: Searching for ISO files ==="
@@ -206,12 +243,28 @@ jobs:
           tail -100 build.log
           exit 1
         fi
-        # Manual isohybrid fix if needed (optional since ISO should work anyway)
-        if command -v isohybrid >/dev/null 2>&1 && [ -n "$ISO_FILE" ]; then
-          echo "Running isohybrid manually..."
-          sudo isohybrid "$ISO_FILE" || echo "isohybrid failed, but ISO should still work"
-        else
-          echo "isohybrid not found or no ISO file, but ISO should still be bootable"
+        # Manual isohybrid fix - create proper bootable ISO
+        if [ -n "$ISO_FILE" ]; then
+          echo "=== Making ISO bootable ==="
+          
+          # Install required tools
+          sudo apt-get install -y syslinux-utils genisoimage
+          
+          # Check if ISO has boot sectors
+          if ! fdisk -l "$ISO_FILE" | grep -q "Boot"; then
+            echo "⚠️  ISO missing boot sectors - applying isohybrid..."
+            
+            # Apply isohybrid to make it bootable from USB/CD
+            if command -v isohybrid >/dev/null 2>&1; then
+              sudo isohybrid "$ISO_FILE" && echo "✅ isohybrid applied successfully" || echo "❌ isohybrid failed"
+            fi
+            
+            # Verify it's now bootable
+            echo "=== Final boot sector check ==="
+            fdisk -l "$ISO_FILE" | head -10
+          else
+            echo "✅ ISO already has boot sectors"
+          fi
         fi
 
     - name: Rename and prepare ISO
