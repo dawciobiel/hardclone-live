@@ -49,11 +49,31 @@ jobs:
           --memtest none \
           --win32-loader false \
           --bootloader syslinux
+        
+        # Create hook to prevent problematic syslinux themes installation
+        mkdir -p config/hooks/normal
+        cat > config/hooks/normal/0010-skip-missing-packages.hook.chroot << 'EOF'
+#!/bin/bash
+# Skip installation of packages that don't exist in Ubuntu 24.04
+echo "Skipping installation of obsolete syslinux theme packages"
+exit 0
+EOF
+        chmod +x config/hooks/normal/0010-skip-missing-packages.hook.chroot
+        
+        # Override syslinux package list to exclude problematic packages
+        mkdir -p config/package-lists
+        cat > config/package-lists/syslinux.list.binary << 'EOF'
+# Override default syslinux packages - exclude obsolete theme packages
+syslinux-common
+syslinux-utils
+isolinux
+EOF
 
     - name: Add custom packages
       run: |
         cd ubuntu-live
-        cat > config/package-lists/custom.list.chroot << EOF
+        # Add our custom packages (not overriding the syslinux.list.binary)
+        cat > config/package-lists/my-custom.list.chroot << EOF
         # System tools
         curl
         wget
