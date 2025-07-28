@@ -64,7 +64,6 @@ jobs:
           --memtest none \
           --win32-loader false \
           --bootloader grub-efi \
-          --uefi-secure-boot auto \
           --verbose
         # Remove problematic syslinux theme dependencies
         echo "Disabling problematic boot themes..."
