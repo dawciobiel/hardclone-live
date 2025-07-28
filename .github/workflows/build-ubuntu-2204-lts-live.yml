@@ -1,0 +1,366 @@
+# .github/workflows/build-ubuntu-2204-live.yml
+name: Build Ubuntu 22.04 LTS Live ISO
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-22.04
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Free up disk space
+      run: |
+        sudo apt-get remove -y '^dotnet-.*' '^llvm-.*' '^mongodb-.*' '^mysql-.*' || true
+        sudo apt-get remove -y azure-cli google-chrome-stable firefox powershell mono-devel || true
+        sudo apt-get autoremove -y
+        sudo apt-get clean
+        df -h
+
+    - name: Install live-build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          live-build \
+          debootstrap \
+          squashfs-tools \
+          xorriso \
+          isolinux \
+          syslinux-efi \
+          syslinux-utils \
+          syslinux-common \
+          memtest86+ \
+          grub-pc-bin \
+          grub-efi-amd64-bin
+
+    - name: Create workspace
+      run: |
+        mkdir -p ubuntu-2204-live
+        cd ubuntu-2204-live
+
+    - name: Configure live-build for Ubuntu 22.04
+      run: |
+        cd ubuntu-2204-live
+        lb config \
+          --distribution jammy \
+          --archive-areas "main restricted universe multiverse" \
+          --mode ubuntu \
+          --system live \
+          --binary-images iso-hybrid \
+          --bootappend-live "boot=live components username=ubuntu hostname=ubuntu-live" \
+          --debian-installer false \
+          --linux-flavours generic \
+          --memtest memtest86+ \
+          --win32-loader false \
+          --bootloader syslinux \
+          --iso-application "Ubuntu 22.04 LTS Live" \
+          --iso-preparer "Custom Build" \
+          --iso-publisher "GitHub Actions"
+
+    - name: Add your custom packages
+      run: |
+        cd ubuntu-2204-live
+        cat > config/package-lists/custom.list.chroot << 'EOF'
+        # Essential system tools
+        curl
+        wget
+        git
+        vim
+        nano
+        htop
+        tree
+        unzip
+        mc
+        tmux
+        screen
+        bash-completion
+        
+        # Desktop environment
+        ubuntu-desktop-minimal
+        firefox
+        thunar
+        baobab
+        filelight
+        remmina
+        
+        # System monitoring and diagnostics
+        glances
+        iotop
+        iftop
+        ncdu
+        sysstat
+        lsof
+        strace
+        
+        # Disk and partition tools
+        parted
+        gparted
+        e2fsprogs
+        xfsprogs
+        btrfs-progs
+        ntfs-3g
+        exfat-fuse
+        exfat-utils
+        dosfstools
+        
+        # Data recovery and forensics
+        gddrescue
+        partclone
+        clonezilla
+        fsarchiver
+        kpartx
+        testdisk
+        sleuthkit
+        
+        # Archive and compression
+        rsync
+        tar
+        gzip
+        xz-utils
+        zip
+        p7zip-full
+        p7zip-rar
+        
+        # Network tools
+        openssh-client
+        openssh-server
+        net-tools
+        iproute2
+        nmap
+        
+        # Hardware diagnostics
+        smartmontools
+        hdparm
+        fio
+        
+        # Development tools
+        python3
+        python3-pip
+        make
+        gcc
+        build-essential
+        
+        # Security tools
+        chkrootkit
+        rkhunter
+        clamav
+        clamav-daemon
+        
+        # System utilities
+        util-linux
+        procps
+        mount
+        file
+        gpg
+        software-properties-common
+        apt-transport-https
+        ca-certificates
+        EOF
+
+    - name: Add custom user configuration
+      run: |
+        cd ubuntu-2204-live
+        
+        # Create custom bashrc
+        mkdir -p config/includes.chroot/etc/skel
+        cat > config/includes.chroot/etc/skel/.bashrc << 'EOF'
+        # Ubuntu 22.04 Live System - Custom .bashrc
+        
+        # Colorful prompt
+        export PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+        
+        # Useful aliases
+        alias ll='ls -alF'
+        alias la='ls -A'
+        alias l='ls -CF'
+        alias grep='grep --color=auto'
+        alias fgrep='fgrep --color=auto'
+        alias egrep='egrep --color=auto'
+        
+        # Enable bash completion
+        if ! shopt -oq posix; then
+          if [ -f /usr/share/bash-completion/bash_completion ]; then
+            . /usr/share/bash-completion/bash_completion
+          elif [ -f /etc/bash_completion ]; then
+            . /etc/bash_completion
+          fi
+        fi
+        
+        # Welcome message
+        echo "================================================"
+        echo "   Ubuntu 22.04 LTS Live System - Ready!"
+        echo "================================================"
+        echo "Username: ubuntu (passwordless sudo access)"
+        echo "Build date: $(date)"
+        echo "Type 'welcome' for system information"
+        echo "================================================"
+        EOF
+        
+        # Create welcome script
+        mkdir -p config/includes.chroot/usr/local/bin
+        cat > config/includes.chroot/usr/local/bin/welcome << 'EOF'
+#!/bin/bash
+echo "================================================"
+echo "        Ubuntu 22.04 LTS Live System Info"
+echo "================================================"
+echo "System: $(uname -a)"
+echo "Memory: $(free -h | grep '^Mem:' | awk '{print $2 " total, " $7 " available"}')"
+echo "Disk Space: $(df -h / | tail -1 | awk '{print $2 " total, " $4 " free"}')"
+echo "Network: $(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \K\S+' || echo 'No network')"
+echo "================================================"
+echo "Installed tools include:"
+echo "• System: htop, glances, mc, vim, nano"
+echo "• Disk: gparted, testdisk, clonezilla"
+echo "• Network: nmap, openssh, remmina"
+echo "• Security: clamav, chkrootkit, rkhunter"
+echo "• Development: python3, gcc, git"
+echo "================================================"
+EOF
+        chmod +x config/includes.chroot/usr/local/bin/welcome
+        
+        # Auto-login configuration for live user
+        mkdir -p config/includes.chroot/etc/systemd/system/getty@tty1.service.d
+        cat > config/includes.chroot/etc/systemd/system/getty@tty1.service.d/autologin.conf << 'EOF'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin ubuntu --noclear %I $TERM
+EOF
+
+    - name: Add system configuration hooks
+      run: |
+        cd ubuntu-2204-live
+        
+        # Create hooks directory
+        mkdir -p config/hooks/normal
+        
+        # Hook to configure live system
+        cat > config/hooks/normal/0100-live-config.hook.chroot << 'EOF'
+#!/bin/bash
+set -e
+
+echo "Configuring live system..."
+
+# Enable passwordless sudo for ubuntu user
+echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu-live
+chmod 440 /etc/sudoers.d/ubuntu-live
+
+# Disable some unnecessary services for live system
+systemctl disable snapd.service || true
+systemctl disable bluetooth.service || true
+systemctl disable ModemManager.service || true
+
+# Update ClamAV database (if installed)
+if command -v freshclam >/dev/null 2>&1; then
+    freshclam || true
+fi
+
+echo "Live system configuration completed"
+EOF
+        chmod +x config/hooks/normal/0100-live-config.hook.chroot
+
+    - name: Build ISO image
+      run: |
+        cd ubuntu-2204-live
+        echo "Starting Ubuntu 22.04 LTS Live ISO build..."
+        echo "Build started at: $(date)"
+        
+        # Build the ISO
+        sudo lb build 2>&1 | tee build.log
+        
+        echo "Build completed at: $(date)"
+
+    - name: Find and verify ISO
+      run: |
+        cd ubuntu-2204-live
+        
+        # Look for the generated ISO
+        echo "Searching for ISO files..."
+        find . -name "*.iso" -type f -exec ls -lh {} \;
+        
+        ISO_FILE=$(find . -name "*.iso" -type f | head -1)
+        
+        if [ -z "$ISO_FILE" ]; then
+          echo "ERROR: No ISO file found!"
+          echo "Directory contents:"
+          ls -la
+          echo "Build log tail:"
+          tail -50 build.log
+          exit 1
+        fi
+        
+        echo "SUCCESS: Found ISO file: $ISO_FILE"
+        ls -lh "$ISO_FILE"
+        
+        # Verify ISO is bootable
+        if command -v file >/dev/null 2>&1; then
+          file "$ISO_FILE"
+        fi
+        
+        # Check ISO contents
+        if command -v isoinfo >/dev/null 2>&1; then
+          echo "ISO contents preview:"
+          isoinfo -l -i "$ISO_FILE" | head -20 || true
+        fi
+
+    - name: Prepare final ISO
+      run: |
+        cd ubuntu-2204-live
+        
+        # Get timestamp for filename
+        TIMESTAMP=$(date +%Y%m%d-%H%M)
+        ISO_FILE=$(find . -name "*.iso" -type f | head -1)
+        FINAL_NAME="ubuntu-2204-lts-live-custom-${TIMESTAMP}.iso"
+        
+        # Copy with new name
+        cp "$ISO_FILE" "$FINAL_NAME"
+        
+        # Generate checksums
+        sha256sum "$FINAL_NAME" > "${FINAL_NAME}.sha256"
+        md5sum "$FINAL_NAME" > "${FINAL_NAME}.md5"
+        
+        echo "Final ISO details:"
+        ls -lh *.iso *.sha256 *.md5
+        
+        echo "ISO Size: $(du -h $FINAL_NAME | cut -f1)"
+        echo "SHA256: $(cat ${FINAL_NAME}.sha256)"
+
+    - name: Upload ISO artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ubuntu-2204-live-iso
+        path: |
+          ubuntu-2204-live/*.iso
+          ubuntu-2204-live/*.sha256
+          ubuntu-2204-live/*.md5
+          ubuntu-2204-live/build.log
+        retention-days: 30
+
+    - name: Create GitHub release (on tag)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          ubuntu-2204-live/*.iso
+          ubuntu-2204-live/*.sha256
+          ubuntu-2204-live/*.md5
+        body: |
+          Ubuntu 22.04 LTS Live ISO with custom tools
+          
+          Built on: ${{ github.run_number }}
+          Commit: ${{ github.sha }}
+          
+          Included tools:
+          - System: htop, glances, mc, vim, nano
+          - Disk tools: gparted, testdisk, clonezilla  
+          - Network: nmap, openssh, remmina
+          - Security: clamav, chkrootkit, rkhunter
+          - Development: python3, gcc, git
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
