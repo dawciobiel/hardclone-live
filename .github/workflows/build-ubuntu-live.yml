@@ -182,34 +182,48 @@ jobs:
         cd live-build
         echo "Starting ISO build process..."
         sudo lb build 2>&1 | tee build.log
-        # Check if build was successful
-        if [ -f live-image-amd64.hybrid.iso ]; then
+        # Check if build was successful - look for any ISO file
+        echo "Looking for ISO files..."
+        ls -la || echo "Directory listing failed"
+        
+        ISO_FILE=$(find . -name "*.iso" -type f | head -1)
+        if [ -n "$ISO_FILE" ]; then
           echo "✅ ISO build successful!"
-          ls -lh live-image-amd64.hybrid.iso
+          echo "Found ISO: $ISO_FILE"
+          ls -lh "$ISO_FILE"
         else
-          echo "❌ ISO build failed!"
-          echo "Checking for alternative ISO names..."
-          ls -la *.iso || echo "No ISO files found"
+          echo "❌ No ISO file found!"
+          echo "Checking build directory contents..."
+          find . -name "*.iso" -o -name "*image*" | head -10
           tail -50 build.log
           exit 1
         fi
-        # Manual isohybrid fix if needed
-        if command -v isohybrid >/dev/null 2>&1; then
+        # Manual isohybrid fix if needed (optional since ISO should work anyway)
+        if command -v isohybrid >/dev/null 2>&1 && [ -n "$ISO_FILE" ]; then
           echo "Running isohybrid manually..."
-          sudo isohybrid live-image-amd64.hybrid.iso || echo "isohybrid failed, but ISO should still work"
+          sudo isohybrid "$ISO_FILE" || echo "isohybrid failed, but ISO should still work"
         else
-          echo "isohybrid not found, but ISO should still be bootable"
+          echo "isohybrid not found or no ISO file, but ISO should still be bootable"
         fi
 
     - name: Rename and prepare ISO
       run: |
         cd live-build
         TIMESTAMP=$(date +%Y%m%d-%H%M)
-        mv live-image-amd64.hybrid.iso "ubuntu-live-custom-${TIMESTAMP}.iso"
-        # Generate checksum
-        sha256sum "ubuntu-live-custom-${TIMESTAMP}.iso" > "ubuntu-live-custom-${TIMESTAMP}.iso.sha256"
-        echo "Final ISO details:"
-        ls -lh *.iso*
+        
+        # Find the ISO file
+        ISO_FILE=$(find . -name "*.iso" -type f | head -1)
+        if [ -n "$ISO_FILE" ]; then
+          echo "Found ISO file: $ISO_FILE"
+          cp "$ISO_FILE" "ubuntu-live-custom-${TIMESTAMP}.iso"
+          # Generate checksum
+          sha256sum "ubuntu-live-custom-${TIMESTAMP}.iso" > "ubuntu-live-custom-${TIMESTAMP}.iso.sha256"
+          echo "Final ISO details:"
+          ls -lh *.iso*
+        else
+          echo "No ISO file found for renaming!"
+          exit 1
+        fi
 
     - name: Upload ISO as artifact
       uses: actions/upload-artifact@v4
