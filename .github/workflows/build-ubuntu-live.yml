@@ -6,7 +6,7 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:  # Allows  manual trigger
+  workflow_dispatch:  # Allows manual trigger
 
 jobs:
   build-iso:
@@ -72,12 +72,12 @@ jobs:
         # Remove problematic syslinux theme dependencies
         echo "Disabling problematic boot themes..."
         mkdir -p config/hooks/normal
-        cat > config/hooks/normal/9999-disable-boot-themes.hook.chroot << 'EOF'
+        cat > config/hooks/normal/9999-disable-boot-themes.hook.chroot << 'HOOK_EOF'
 #!/bin/bash
 # Remove problematic boot theme packages that don't exist in Ubuntu 24.04
 echo "Skipping problematic boot themes installation"
 exit 0
-EOF
+HOOK_EOF
         chmod +x config/hooks/normal/9999-disable-boot-themes.hook.chroot
 
     - name: Add custom packages
@@ -85,7 +85,7 @@ EOF
         cd live-build
 
         # Add additional packages for installation
-        cat > config/package-lists/custom.list.chroot << EOF
+        cat > config/package-lists/custom.list.chroot << 'PACKAGES_EOF'
         # Basic tools
         curl
         wget
@@ -176,7 +176,7 @@ EOF
         util-linux
         procps
         mount
-        EOF
+PACKAGES_EOF
 
         # Verify packages exist (optional check)
         echo "Verifying package availability..."
@@ -196,7 +196,7 @@ EOF
         mkdir -p config/includes.chroot/etc/skel
 
         # Add custom bashrc
-        cat > config/includes.chroot/etc/skel/.bashrc << 'EOF'
+        cat > config/includes.chroot/etc/skel/.bashrc << 'BASHRC_EOF'
         # Custom bashrc for Live system
         export PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
         alias ll='ls -alF'
@@ -205,19 +205,19 @@ EOF
 
         echo "Welcome to Ubuntu Live System!"
         echo "Build date: $(date)"
-        EOF
+BASHRC_EOF
 
         # Add welcome script
         mkdir -p config/includes.chroot/usr/local/bin
-        cat > config/includes.chroot/usr/local/bin/welcome << 'EOF'
-        #!/bin/bash
-        echo "========================================="
-        echo "    Ubuntu Live System - Ready to use   "
-        echo "========================================="
-        echo "Username: live (no password required)"
-        echo "To become root: sudo su"
-        echo "========================================="
-        EOF
+        cat > config/includes.chroot/usr/local/bin/welcome << 'WELCOME_EOF'
+#!/bin/bash
+echo "========================================="
+echo "    Ubuntu Live System - Ready to use   "
+echo "========================================="
+echo "Username: live (no password required)"
+echo "To become root: sudo su"
+echo "========================================="
+WELCOME_EOF
         chmod +x config/includes.chroot/usr/local/bin/welcome
 
     - name: Build ISO image
