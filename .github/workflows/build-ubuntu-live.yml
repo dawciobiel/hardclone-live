@@ -47,7 +47,6 @@ jobs:
     - name: Create build directory
       run: |
         mkdir -p live-build
-        cd live-build
 
     - name: Configure live-build
       run: |
@@ -64,7 +63,7 @@ jobs:
           --linux-flavours generic \
           --memtest none \
           --win32-loader false \
-          --bootloaders syslinux \
+          --bootloader syslinux \
           --verbose
         # Ensure bootloader files are present
         echo "Checking bootloader configuration..."
