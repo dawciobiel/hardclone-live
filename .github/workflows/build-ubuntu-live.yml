@@ -65,6 +65,7 @@ jobs:
           --win32-loader false \
           --bootloader syslinux \
           --verbose
+        
         # Ensure bootloader files are present
         echo "Checking bootloader configuration..."
         mkdir -p config/bootloaders
@@ -88,6 +89,12 @@ jobs:
           kernel /live/vmlinuz
           append initrd=/live/initrd.img boot=live components username=live hostname=ubuntu-live noapic noapm nodma nomce nolapic nomodeset nosmp nosplash vga=normal
         SYSLINUX_EOF
+        
+        # Create hooks directory structure BEFORE creating the hook file
+        echo "Setting up hooks..."
+        mkdir -p config/hooks/normal
+        
+        # Create the hook file
         cat > config/hooks/normal/9999-disable-boot-themes.hook.chroot << 'HOOK_EOF'
         #!/bin/bash
         # Remove problematic boot theme packages that don't exist in Ubuntu 24.04
@@ -99,6 +106,9 @@ jobs:
     - name: Add custom packages
       run: |
         cd live-build
+        # Create package-lists directory structure
+        mkdir -p config/package-lists
+        
         # Add additional packages for installation
         cat > config/package-lists/custom.list.chroot << 'PACKAGES_EOF'
         curl
@@ -174,6 +184,7 @@ jobs:
       run: |
         cd live-build
         mkdir -p config/includes.chroot/etc/skel
+        
         # Add custom bashrc
         cat > config/includes.chroot/etc/skel/.bashrc << 'BASHRC_EOF'
         # Custom bashrc for Live system
@@ -184,6 +195,7 @@ jobs:
         echo "Welcome to Ubuntu Live System!"
         echo "Build date: $(date)"
         BASHRC_EOF
+        
         # Add welcome script
         mkdir -p config/includes.chroot/usr/local/bin
         cat > config/includes.chroot/usr/local/bin/welcome << 'WELCOME_EOF'
@@ -200,24 +212,9 @@ jobs:
     - name: Build ISO image
       run: |
         cd live-build
-        # Check if bootloader was properly configured
-        echo "=== Checking bootloader configuration ==="
-        if [ -d binary/isolinux ]; then
-          echo "✅ isolinux directory found"
-          ls -la binary/isolinux/
-        else
-          echo "❌ No isolinux directory - bootloader problem!"
-        fi
-        
-        if [ -d binary/boot ]; then
-          echo "✅ boot directory found"
-          find binary/boot -name "*.bin" -o -name "*.img" | head -5
-        else
-          echo "❌ No boot directory found"
-        fi
-        
-        echo "=== Build completed, checking results ==="
+        echo "=== Starting ISO build ==="
         sudo lb build 2>&1 | tee build.log
+        
         # Check if build was successful - comprehensive search
         echo "=== DEBUG: Searching for ISO files ==="
         echo "Current directory: $(pwd)"
@@ -242,6 +239,7 @@ jobs:
           tail -100 build.log
           exit 1
         fi
+        
         # Manual isohybrid fix - create proper bootable ISO
         if [ -n "$ISO_FILE" ]; then
           echo "=== Making ISO bootable ==="
