@@ -37,34 +37,19 @@ jobs:
 
       - name: Configure chroot (KDE + live user)
         run: |
-          cat << 'EOL' > ~/live-build/chroot/customize.sh
-          #!/bin/bash
-          export DEBIAN_FRONTEND=noninteractive
-
-          apt update
-          apt install -y \
-            ubuntu-standard \
-            casper \
-            network-manager \
-            sudo \
-            kde-plasma-desktop \
-            sddm \
-            xinit
-
-          # Create live user
-          useradd -m -s /bin/bash liveuser
-          echo "liveuser:live" | chpasswd
-          usermod -aG sudo liveuser
-
-          # Autologin
-          mkdir -p /etc/sddm.conf.d
-          echo "[Autologin]" > /etc/sddm.conf.d/autologin.conf
-          echo "User=liveuser" >> /etc/sddm.conf.d/autologin.conf
-          echo "Session=plasma.desktop" >> /etc/sddm.conf.d/autologin.conf
-
-          systemctl enable sddm
-          apt clean
-          EOL
+          echo '#!/bin/bash' > ~/live-build/chroot/customize.sh
+          echo 'export DEBIAN_FRONTEND=noninteractive' >> ~/live-build/chroot/customize.sh
+          echo 'apt update' >> ~/live-build/chroot/customize.sh
+          echo 'apt install -y ubuntu-standard casper network-manager sudo kde-plasma-desktop sddm xinit' >> ~/live-build/chroot/customize.sh
+          echo 'useradd -m -s /bin/bash liveuser' >> ~/live-build/chroot/customize.sh
+          echo 'echo "liveuser:live" | chpasswd' >> ~/live-build/chroot/customize.sh
+          echo 'usermod -aG sudo liveuser' >> ~/live-build/chroot/customize.sh
+          echo 'mkdir -p /etc/sddm.conf.d' >> ~/live-build/chroot/customize.sh
+          echo 'echo "[Autologin]" > /etc/sddm.conf.d/autologin.conf' >> ~/live-build/chroot/customize.sh
+          echo 'echo "User=liveuser" >> /etc/sddm.conf.d/autologin.conf' >> ~/live-build/chroot/customize.sh
+          echo 'echo "Session=plasma.desktop" >> /etc/sddm.conf.d/autologin.conf' >> ~/live-build/chroot/customize.sh
+          echo 'systemctl enable sddm' >> ~/live-build/chroot/customize.sh
+          echo 'apt clean' >> ~/live-build/chroot/customize.sh
 
           chmod +x ~/live-build/chroot/customize.sh
           mount --bind /dev ~/live-build/chroot/dev
@@ -75,15 +60,12 @@ jobs:
       - name: Prepare ISO structure
         run: |
           mkdir -p ~/live-build/iso/{casper,boot/grub,isolinux}
-
           cp /usr/lib/ISOLINUX/isolinux.bin ~/live-build/iso/isolinux/
           cp /usr/lib/syslinux/modules/bios/* ~/live-build/iso/isolinux/
-
           mksquashfs ~/live-build/chroot ~/live-build/iso/casper/filesystem.squashfs -e boot
 
           echo "ubuntu 24.04 live" > ~/live-build/iso/README.diskdefines
           echo "casper" > ~/live-build/iso/casper/ubuntu.version
-
           touch ~/live-build/iso/casper/filesystem.manifest
           touch ~/live-build/iso/casper/filesystem.size
 
@@ -97,13 +79,14 @@ jobs:
           mkdir -p ~/live-build/iso/boot/grub
           echo "set timeout=5" > ~/live-build/iso/boot/grub/grub.cfg
           echo "menuentry 'Ubuntu 24.04 Live KDE' {" >> ~/live-build/iso/boot/grub/grub.cfg
-          echo "  linux /casper/vmlinuz boot=casper quiet splash ---" >> ~/live-build/iso/boot/grub/grub.cfg
-          echo "  initrd /casper/initrd" >> ~/live-build/iso/boot/grub/grub.cfg
+          echo "    linux /casper/vmlinuz boot=casper quiet splash ---" >> ~/live-build/iso/boot/grub/grub.cfg
+          echo "    initrd /casper/initrd" >> ~/live-build/iso/boot/grub/grub.cfg
           echo "}" >> ~/live-build/iso/boot/grub/grub.cfg
 
       - name: Create the ISO
         run: |
-          grub-mkrescue -o ~/ubuntu-24.04-live-kde.iso ~/live-build/iso || echo "Skipping isohybrid - ISO will still be bootable"
+          grub-mkrescue -o ~/ubuntu-24.04-live-kde.iso ~/live-build/iso || \
+            echo "Skipping isohybrid - ISO will still be bootable"
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
