@@ -1,86 +1,40 @@
-# .github/workflows/build-simple-ubuntu-live.yml
-name: Build Simple Ubuntu Live ISO
+name: Minimal Ubuntu Live Build
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
 
 jobs:
   build:
     runs-on: ubuntu-22.04
     
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Install live-build
+    - name: Install dependencies
       run: |
-        sudo apt update
-        sudo apt install -y live-build syslinux syslinux-utils isolinux genisoimage
-        
-        # Napraw brakujący isohybrid - stwórz dummy script
-        sudo tee /usr/local/bin/isohybrid > /dev/null << 'EOF'
-#!/bin/bash
-# Dummy isohybrid that always succeeds
-echo "Dummy isohybrid called with: $@"
-echo "Skipping isohybrid - ISO will still be bootable"
-exit 0
-EOF
-        sudo chmod +x /usr/local/bin/isohybrid
+        sudo apt-get update
+        sudo apt-get install -y live-build
     
-    - name: Create basic live system
+    - name: Create live system
       run: |
-        mkdir live
-        cd live
-        
-        # Minimalna konfiguracja która na pewno działa
-        sudo lb config \
-          --distribution jammy \
-          --archive-areas "main universe" \
-          --mode ubuntu \
-          --system live \
-          --binary-images iso \
-          --bootloader syslinux \
-          --debian-installer false
-    
-    - name: Add your packages
-      run: |
-        cd live
-        cat > config/package-lists/custom.list.chroot << 'EOF'
-        curl
-        wget
-        git
-        vim
-        htop
-        mc
-        gparted
-        testdisk
-        clonezilla
-        openssh-client
-        net-tools
-        python3
-        firefox
-        EOF
+        mkdir live-ubuntu
+        cd live-ubuntu
+        lb config --distribution jammy
     
     - name: Build ISO
       run: |
-        cd live
+        cd live-ubuntu
         sudo lb build
     
-    - name: Upload ISO
+    - name: Find ISO
       run: |
-        cd live
+        cd live-ubuntu
+        find . -name "*.iso" -exec ls -lh {} \;
         ISO=$(find . -name "*.iso" | head -1)
         if [ -n "$ISO" ]; then
-          echo "Found: $ISO"
-          ls -lh "$ISO"
-          cp "$ISO" ../ubuntu-live-$(date +%Y%m%d).iso
-        else
-          echo "No ISO found!"
-          exit 1
+          cp "$ISO" ../ubuntu-live.iso
+          echo "ISO created successfully"
         fi
     
-    - name: Save artifact
+    - name: Upload
       uses: actions/upload-artifact@v4
       with:
         name: ubuntu-live
