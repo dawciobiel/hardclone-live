@@ -182,9 +182,18 @@ jobs:
         cd live-build
         echo "Starting ISO build process..."
         sudo lb build 2>&1 | tee build.log
-        # Check if build was successful - look for any ISO file
-        echo "Looking for ISO files..."
-        ls -la || echo "Directory listing failed"
+        # Check if build was successful - comprehensive search
+        echo "=== DEBUG: Searching for ISO files ==="
+        echo "Current directory: $(pwd)"
+        echo "Directory contents:"
+        ls -la
+        echo "=== Searching for ISO files recursively ==="
+        find . -name "*.iso" -type f -exec ls -lh {} \;
+        echo "=== Searching for any image files ==="
+        find . -name "*image*" -type f | head -10
+        echo "=== Looking for binary files ==="
+        find . -name "binary*" -type f | head -5
+        echo "=================================="
         
         ISO_FILE=$(find . -name "*.iso" -type f | head -1)
         if [ -n "$ISO_FILE" ]; then
@@ -193,9 +202,8 @@ jobs:
           ls -lh "$ISO_FILE"
         else
           echo "❌ No ISO file found!"
-          echo "Checking build directory contents..."
-          find . -name "*.iso" -o -name "*image*" | head -10
-          tail -50 build.log
+          echo "This might be a live-build naming issue"
+          tail -100 build.log
           exit 1
         fi
         # Manual isohybrid fix if needed (optional since ISO should work anyway)
