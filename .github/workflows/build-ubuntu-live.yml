@@ -6,7 +6,7 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:  # Allows manual  trigger
+  workflow_dispatch:  # Allows manual trigger
 
 jobs:
   build-iso:
@@ -23,7 +23,6 @@ jobs:
         sudo apt-get remove -y azure-cli google-chrome-stable firefox powershell mono-devel
         sudo apt-get autoremove -y
         sudo apt-get clean
-
         # Show available space
         df -h
 
@@ -52,7 +51,6 @@ jobs:
     - name: Configure live-build
       run: |
         cd live-build
-
         # Basic configuration
         lb config \
           --distribution noble \
@@ -68,25 +66,22 @@ jobs:
           --bootloader grub-efi \
           --uefi-secure-boot auto \
           --verbose
-
         # Remove problematic syslinux theme dependencies
         echo "Disabling problematic boot themes..."
         mkdir -p config/hooks/normal
         cat > config/hooks/normal/9999-disable-boot-themes.hook.chroot << 'HOOK_EOF'
-#!/bin/bash
-# Remove problematic boot theme packages that don't exist in Ubuntu 24.04
-echo "Skipping problematic boot themes installation"
-exit 0
-HOOK_EOF
+        #!/bin/bash
+        # Remove problematic boot theme packages that don't exist in Ubuntu 24.04
+        echo "Skipping problematic boot themes installation"
+        exit 0
+        HOOK_EOF
         chmod +x config/hooks/normal/9999-disable-boot-themes.hook.chroot
 
     - name: Add custom packages
       run: |
         cd live-build
-
         # Add additional packages for installation
         cat > config/package-lists/custom.list.chroot << 'PACKAGES_EOF'
-        # Basic tools
         curl
         wget
         git
@@ -99,20 +94,12 @@ HOOK_EOF
         tmux
         screen
         bash-completion
-
-        # Desktop environment (optional - remove if you want terminal only)
         ubuntu-desktop-minimal
         firefox
-
-        # File managers and disk usage analyzers
         thunar
         baobab
         filelight
-
-        # Remote access
         remmina
-
-        # System monitoring and utilities
         glances
         iotop
         iftop
@@ -120,8 +107,6 @@ HOOK_EOF
         sysstat
         lsof
         strace
-
-        # Disk and filesystem tools
         parted
         gparted
         e2fsprogs
@@ -135,8 +120,6 @@ HOOK_EOF
         clonezilla
         fsarchiver
         kpartx
-
-        # Archive and compression tools
         rsync
         tar
         gzip
@@ -144,57 +127,34 @@ HOOK_EOF
         zip
         p7zip-full
         p7zip-rar
-
-        # Network tools
         openssh-client
         openssh-server
         net-tools
         iproute2
         nmap
-
-        # Hardware monitoring
         smartmontools
         hdparm
         fio
-
-        # Development tools
         python3
         make
         gcc
         build-essential
         gpg
         file
-
-        # Security and forensics
         testdisk
         sleuthkit
         chkrootkit
         rkhunter
         clamav
-
-        # Core system tools (these provide the missing commands)
         util-linux
         procps
         mount
-PACKAGES_EOF
-
-        # Verify packages exist (optional check)
-        echo "Verifying package availability..."
-        packages=(mc thunar baobab filelight remmina glances iotop iftop ncdu sysstat lsof strace parted gparted e2fsprogs xfsprogs btrfs-progs ntfs-3g exfat-fuse dosfstools gddrescue partclone clonezilla fsarchiver kpartx rsync tar gzip xz-utils zip p7zip-full p7zip-rar openssh-client openssh-server net-tools iproute2 nmap smartmontools hdparm fio python3 make gcc build-essential gpg file testdisk sleuthkit chkrootkit rkhunter clamav util-linux procps mount)
-
-        for pkg in "${packages[@]}"; do
-          if apt-cache show "$pkg" >/dev/null 2>&1; then
-            echo "✅ $pkg - available"
-          else
-            echo "❌ $pkg - NOT FOUND (may need different name or repository)"
-          fi
-        done
+        PACKAGES_EOF
 
     - name: Add custom configurations
       run: |
         cd live-build
         mkdir -p config/includes.chroot/etc/skel
-
         # Add custom bashrc
         cat > config/includes.chroot/etc/skel/.bashrc << 'BASHRC_EOF'
         # Custom bashrc for Live system
@@ -202,22 +162,20 @@ PACKAGES_EOF
         alias ll='ls -alF'
         alias la='ls -A'
         alias l='ls -CF'
-
         echo "Welcome to Ubuntu Live System!"
         echo "Build date: $(date)"
-BASHRC_EOF
-
+        BASHRC_EOF
         # Add welcome script
         mkdir -p config/includes.chroot/usr/local/bin
         cat > config/includes.chroot/usr/local/bin/welcome << 'WELCOME_EOF'
-#!/bin/bash
-echo "========================================="
-echo "    Ubuntu Live System - Ready to use   "
-echo "========================================="
-echo "Username: live (no password required)"
-echo "To become root: sudo su"
-echo "========================================="
-WELCOME_EOF
+        #!/bin/bash
+        echo "========================================="
+        echo "    Ubuntu Live System - Ready to use   "
+        echo "========================================="
+        echo "Username: live (no password required)"
+        echo "To become root: sudo su"
+        echo "========================================="
+        WELCOME_EOF
         chmod +x config/includes.chroot/usr/local/bin/welcome
 
     - name: Build ISO image
@@ -225,7 +183,6 @@ WELCOME_EOF
         cd live-build
         echo "Starting ISO build process..."
         sudo lb build 2>&1 | tee build.log
-
         # Check if build was successful
         if [ -f live-image-amd64.hybrid.iso ]; then
           echo "✅ ISO build successful!"
@@ -237,7 +194,6 @@ WELCOME_EOF
           tail -50 build.log
           exit 1
         fi
-
         # Manual isohybrid fix if needed
         if command -v isohybrid >/dev/null 2>&1; then
           echo "Running isohybrid manually..."
@@ -251,10 +207,8 @@ WELCOME_EOF
         cd live-build
         TIMESTAMP=$(date +%Y%m%d-%H%M)
         mv live-image-amd64.hybrid.iso "ubuntu-live-custom-${TIMESTAMP}.iso"
-
         # Generate checksum
         sha256sum "ubuntu-live-custom-${TIMESTAMP}.iso" > "ubuntu-live-custom-${TIMESTAMP}.iso.sha256"
-
         echo "Final ISO details:"
         ls -lh *.iso*
 
