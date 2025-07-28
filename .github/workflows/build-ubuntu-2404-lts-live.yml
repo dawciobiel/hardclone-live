@@ -4,76 +4,74 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-live-iso:
+  build:
     runs-on: ubuntu-latest
+    name: Build Custom Ubuntu ISO
 
     steps:
-      - name: Checkout (optional)
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: Install dependencies
+      - name: Install required packages
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            debootstrap squashfs-tools xorriso grub-pc-bin grub-efi-amd64-bin mtools \
-            dosfstools isolinux syslinux-common syslinux-utils
+          sudo apt update
+          sudo apt install -y \
+            debootstrap squashfs-tools xorriso isolinux syslinux-utils grub-pc-bin grub-efi-amd64-bin mtools
 
       - name: Create working directories
         run: |
-          mkdir -p ~/live-build/{chroot,iso}
+          mkdir -p iso/{boot/grub,casper}
+          mkdir -p custom-image/chroot
 
-      - name: Bootstrap Ubuntu 24.04 LTS
+      - name: Bootstrap Ubuntu base system
         run: |
-          sudo debootstrap --arch=amd64 noble ~/live-build/chroot http://archive.ubuntu.com/ubuntu/
+          sudo debootstrap --arch=amd64 noble custom-image/chroot http://archive.ubuntu.com/ubuntu
 
-      - name: Configure chroot system
+      - name: Chroot and customize the system
         run: |
-          sudo mount --bind /dev ~/live-build/chroot/dev
-          sudo cp /etc/resolv.conf ~/live-build/chroot/etc/
-
-          sudo chroot ~/live-build/chroot /bin/bash -c "
-            apt-get update
-            apt-get install -y ubuntu-standard casper lupin-casper discover laptop-detect os-prober network-manager net-tools \
-              locales sudo systemd-sysv plymouth \
-              xorg lightdm firefox \
-              kde-plasma-desktop
-            echo 'live ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/live
+          sudo cp /etc/resolv.conf custom-image/chroot/etc/
+          sudo mount --bind /dev custom-image/chroot/dev
+          sudo mount --bind /run custom-image/chroot/run
+          sudo chroot custom-image/chroot /bin/bash -c "
+            apt update
+            apt install -y ubuntu-mate-desktop casper lupin-casper network-manager resolvconf systemd-sysv
             useradd -m -s /bin/bash live
-            passwd -d live
-            locale-gen en_US.UTF-8
-            echo 'ubuntu-live' > /etc/hostname
-            echo 'LANG=en_US.UTF-8' > /etc/default/locale
+            echo 'live:live' | chpasswd
+            echo 'live ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/live
+            chmod 0440 /etc/sudoers.d/live
+            apt clean
+            exit
           "
+          sudo umount custom-image/chroot/dev
+          sudo umount custom-image/chroot/run
 
-          sudo umount ~/live-build/chroot/dev
-
-      - name: Create squashfs
+      - name: Create SquashFS image
         run: |
-          sudo mksquashfs ~/live-build/chroot ~/live-build/iso/casper/filesystem.squashfs -e boot
+          sudo mksquashfs custom-image/chroot iso/casper/filesystem.squashfs -e boot
 
       - name: Copy kernel and initrd
         run: |
-          sudo cp ~/live-build/chroot/boot/vmlinuz* ~/live-build/iso/casper/vmlinuz
-          sudo cp ~/live-build/chroot/boot/initrd.img* ~/live-build/iso/casper/initrd
+          sudo cp custom-image/chroot/boot/vmlinuz* iso/casper/vmlinuz
+          sudo cp custom-image/chroot/boot/initrd.img* iso/casper/initrd
 
-      - name: Write grub config
+      - name: Create grub configuration
         run: |
-          mkdir -p ~/live-build/iso/boot/grub
-          cat <<EOF > ~/live-build/iso/boot/grub/grub.cfg
-          set timeout=10
-          menuentry "Try Ubuntu 24.04 Live (KDE)" {
+          cat <<EOF | sudo tee iso/boot/grub/grub.cfg
+          set default=0
+          set timeout=5
+
+          menuentry "Start Ubuntu MATE 24.04 Live" {
               linux /casper/vmlinuz boot=casper quiet splash ---
               initrd /casper/initrd
           }
-EOF
+          EOF
 
-      - name: Create the ISO
+      - name: Build ISO
         run: |
-          grub-mkrescue -o ubuntu-24.04-live.iso ~/live-build/iso || \
-            echo "Skipping isohybrid - ISO will still be bootable"
+          grub-mkrescue -o ubuntu-2404-mate-live.iso iso --compress=xz
 
       - name: Upload ISO artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
-          name: ubuntu-24.04-live
-          path: ubuntu-24.04-live.iso
+          name: ubuntu-2404-mate-live.iso
+          path: ubuntu-2404-mate-live.iso
