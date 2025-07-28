@@ -3,4 +3,6 @@
 # Logs
 logs/
 
+# Output folder
+live-build/
 
