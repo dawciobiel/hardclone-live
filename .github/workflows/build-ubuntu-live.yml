@@ -6,137 +6,55 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:  # Allows manual trigger
+  workflow_dispatch:
 
 jobs:
   build-iso:
     runs-on: ubuntu-24.04
-
+    
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
     - name: Free up disk space
       run: |
-        # Remove unnecessary packages to free up space
-        sudo apt-get remove -y '^dotnet-.*' '^llvm-.*' '^mongodb-.*' '^mysql-.*'
-        sudo apt-get remove -y azure-cli google-chrome-stable firefox powershell mono-devel
+        sudo apt-get remove -y '^dotnet-.*' '^llvm-.*' '^mongodb-.*' '^mysql-.*' || true
+        sudo apt-get remove -y azure-cli google-chrome-stable firefox powershell mono-devel || true
         sudo apt-get autoremove -y
         sudo apt-get clean
-        # Show available space
         df -h
 
-    - name: Install build dependencies
+    - name: Install live-build
       run: |
         sudo apt-get update
-        sudo apt-get install -y \
-          live-build \
-          debootstrap \
-          squashfs-tools \
-          xorriso \
-          isolinux \
-          syslinux-efi \
-          syslinux-utils \
-          syslinux-common \
-          memtest86+ \
-          grub-pc-bin \
-          grub-efi-amd64-bin \
-          mtools \
-          dosfstools
+        sudo apt-get install -y live-build debootstrap squashfs-tools xorriso isolinux syslinux-efi
 
-    - name: Create build directory
+    - name: Create workspace
       run: |
-        mkdir -p live-build
+        mkdir -p ubuntu-live
+        cd ubuntu-live
 
     - name: Configure live-build
       run: |
-        cd live-build
-        # Basic configuration
+        cd ubuntu-live
         lb config \
           --distribution noble \
           --archive-areas "main restricted universe multiverse" \
           --mode ubuntu \
           --system live \
           --binary-images iso-hybrid \
-          --bootappend-live "boot=live components username=live hostname=ubuntu-live" \
+          --bootappend-live "boot=live components username=ubuntu hostname=ubuntu-live" \
           --debian-installer false \
           --linux-flavours generic \
           --memtest none \
           --win32-loader false \
-          --bootloader syslinux \
-          --verbose
-        
-        # Ensure bootloader files are present
-        echo "Checking bootloader configuration..."
-        mkdir -p config/bootloaders
-        
-        # Force syslinux configuration
-        echo "Setting up syslinux bootloader..."
-        mkdir -p config/bootloaders/syslinux
-        
-        # Basic syslinux config
-        cat > config/bootloaders/syslinux/syslinux.cfg << 'SYSLINUX_EOF'
-        default live
-        timeout 30
-
-        label live
-          menu label ^Ubuntu Live
-          kernel /live/vmlinuz
-          append initrd=/live/initrd.img boot=live components username=live hostname=ubuntu-live
-
-        label live-failsafe
-          menu label Ubuntu Live (failsafe)
-          kernel /live/vmlinuz
-          append initrd=/live/initrd.img boot=live components username=live hostname=ubuntu-live noapic noapm nodma nomce nolapic nomodeset nosmp nosplash vga=normal
-        SYSLINUX_EOF
-        
-        # Create hooks directory structure BEFORE creating the hook file
-        echo "Setting up hooks..."
-        mkdir -p config/hooks/normal
-        
-        # Create hook to ignore permission errors during build
-        cat > config/hooks/normal/0001-fix-permissions.hook.chroot << 'PERM_HOOK_EOF'
-        #!/bin/bash
-        # Fix common permission issues in live build
-        echo "Fixing permissions in chroot environment..."
-        
-        # Fix common directories that cause permission issues
-        find /var/spool -type d -exec chmod 755 {} \; 2>/dev/null || true
-        find /var/log -type d -exec chmod 755 {} \; 2>/dev/null || true
-        find /var/cache -type d -exec chmod 755 {} \; 2>/dev/null || true
-        find /var/lib -type d -exec chmod 755 {} \; 2>/dev/null || true
-        
-        # Set proper permissions for common problematic directories
-        chmod 755 /var/spool/postfix/* 2>/dev/null || true
-        chmod 755 /var/spool/cron/* 2>/dev/null || true
-        chmod 755 /var/lib/polkit-1 2>/dev/null || true
-        chmod 755 /var/lib/private 2>/dev/null || true
-        chmod 755 /etc/polkit-1/rules.d 2>/dev/null || true
-        chmod 755 /etc/ssl/private 2>/dev/null || true
-        chmod 755 /run/sudo 2>/dev/null || true
-        
-        echo "Permission fixes applied"
-        exit 0
-        PERM_HOOK_EOF
-        chmod +x config/hooks/normal/0001-fix-permissions.hook.chroot
-        
-        # Create the original hook file
-        cat > config/hooks/normal/9999-disable-boot-themes.hook.chroot << 'HOOK_EOF'
-        #!/bin/bash
-        # Remove problematic boot theme packages that don't exist in Ubuntu 24.04
-        echo "Skipping problematic boot themes installation"
-        exit 0
-        HOOK_EOF
-        chmod +x config/hooks/normal/9999-disable-boot-themes.hook.chroot
+          --bootloader syslinux
 
     - name: Add custom packages
       run: |
-        cd live-build
-        # Create package-lists directory structure
-        mkdir -p config/package-lists
-        
-        # Add additional packages for installation
-        cat > config/package-lists/custom.list.chroot << 'PACKAGES_EOF'
+        cd ubuntu-live
+        cat > config/package-lists/custom.list.chroot << EOF
+        # System tools
         curl
         wget
         git
@@ -149,12 +67,13 @@ jobs:
         tmux
         screen
         bash-completion
+        
+        # Desktop environment
         ubuntu-desktop-minimal
         firefox
         thunar
-        baobab
-        filelight
-        remmina
+        
+        # System monitoring
         glances
         iotop
         iftop
@@ -162,6 +81,8 @@ jobs:
         sysstat
         lsof
         strace
+        
+        # Disk tools
         parted
         gparted
         e2fsprogs
@@ -170,11 +91,15 @@ jobs:
         ntfs-3g
         exfat-fuse
         dosfstools
+        
+        # Recovery tools
         gddrescue
         partclone
         clonezilla
         fsarchiver
-        kpartx
+        testdisk
+        
+        # Archive tools
         rsync
         tar
         gzip
@@ -182,190 +107,97 @@ jobs:
         zip
         p7zip-full
         p7zip-rar
+        
+        # Network tools
         openssh-client
         openssh-server
         net-tools
         iproute2
         nmap
+        
+        # Hardware tools
         smartmontools
         hdparm
         fio
+        
+        # Development
         python3
         make
         gcc
         build-essential
-        gpg
-        file
-        testdisk
-        sleuthkit
+        
+        # Security
         chkrootkit
         rkhunter
         clamav
+        
+        # System utilities
         util-linux
         procps
         mount
-        PACKAGES_EOF
+        file
+        gpg
+        EOF
 
-    - name: Add custom configurations
+    - name: Add custom configuration
       run: |
-        cd live-build
+        cd ubuntu-live
         mkdir -p config/includes.chroot/etc/skel
         
-        # Add custom bashrc
-        cat > config/includes.chroot/etc/skel/.bashrc << 'BASHRC_EOF'
-        # Custom bashrc for Live system
+        cat > config/includes.chroot/etc/skel/.bashrc << 'EOF'
+        # Ubuntu Live System .bashrc
         export PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
         alias ll='ls -alF'
         alias la='ls -A'
         alias l='ls -CF'
-        echo "Welcome to Ubuntu Live System!"
+        
+        echo "=== Ubuntu Live System ==="
+        echo "Username: ubuntu (sudo without password)"
         echo "Build date: $(date)"
-        BASHRC_EOF
-        
-        # Add welcome script
-        mkdir -p config/includes.chroot/usr/local/bin
-        cat > config/includes.chroot/usr/local/bin/welcome << 'WELCOME_EOF'
-        #!/bin/bash
-        echo "========================================="
-        echo "    Ubuntu Live System - Ready to use   "
-        echo "========================================="
-        echo "Username: live (no password required)"
-        echo "To become root: sudo su"
-        echo "========================================="
-        WELCOME_EOF
-        chmod +x config/includes.chroot/usr/local/bin/welcome
+        echo "=========================="
+        EOF
 
-    - name: Build ISO image
+    - name: Build ISO
       run: |
-        cd live-build
-        echo "=== Starting ISO build ==="
-        
-        # Set proper umask for build process
-        umask 022
-        
-        # Build with better error handling and permission fixes
-        set +e  # Don't exit on first error during build
-        sudo -E lb build 2>&1 | tee build.log
-        BUILD_EXIT_CODE=${PIPESTATUS[0]}
-        set -e  # Re-enable exit on error
-        
-        echo "=== Build process completed with exit code: $BUILD_EXIT_CODE ==="
-        
-        # Even if build had some permission warnings, check if ISO was created
-        echo "=== Searching for ISO files ==="
-        echo "Current directory: $(pwd)"
-        echo "Directory contents:"
-        ls -la
-        
-        # Look for ISO files recursively
-        find . -name "*.iso" -type f -exec ls -lh {} \; 2>/dev/null || true
-        
-        # Also check for common live-build output names
-        find . -name "live-image-*.iso" -type f 2>/dev/null || true
-        find . -name "binary*.iso" -type f 2>/dev/null || true
-        
-        ISO_FILE=$(find . -name "*.iso" -type f 2>/dev/null | head -1)
-        
-        if [ -n "$ISO_FILE" ]; then
-          echo "✅ ISO build successful!"
-          echo "Found ISO: $ISO_FILE"
-          ls -lh "$ISO_FILE"
-          
-          # Fix ownership if needed
-          sudo chown $(whoami):$(whoami) "$ISO_FILE" 2>/dev/null || true
-          
-        elif [ $BUILD_EXIT_CODE -eq 0 ]; then
-          # Build succeeded but no ISO found - check binary directory
-          echo "⚠️  Build succeeded but no ISO file found in expected location"
-          echo "Checking binary directory:"
-          if [ -d binary ]; then
-            find binary -name "*.iso" -o -name "*image*" | head -5
-            # Sometimes the image might be in binary directory without .iso extension
-            if [ -f binary/live-image-amd64.hybrid.iso ]; then
-              mv binary/live-image-amd64.hybrid.iso ./live-image.iso
-              ISO_FILE="./live-image.iso"
-              echo "✅ Found and moved ISO: $ISO_FILE"
-            fi
-          fi
-        else
-          echo "❌ Build failed with exit code: $BUILD_EXIT_CODE"
-          echo "Last 100 lines of build log:"
-          tail -100 build.log
-          
-          # Check if it's just permission warnings that we can ignore
-          if grep -q "Permission denied" build.log && ! grep -q "E: " build.log; then
-            echo "⚠️  Only permission warnings found, checking for ISO anyway..."
-            ISO_FILE=$(find . -name "*.iso" -type f 2>/dev/null | head -1)
-            if [ -n "$ISO_FILE" ]; then
-              echo "✅ ISO was created despite permission warnings!"
-              ls -lh "$ISO_FILE"
-            else
-              exit 1
-            fi
-          else
-            exit 1
-          fi
-        fi
-        
-        # Make ISO bootable if found
-        if [ -n "$ISO_FILE" ]; then
-          echo "=== Making ISO bootable ==="
-          
-          # Install required tools
-          sudo apt-get install -y syslinux-utils genisoimage
-          
-          # Check if ISO has boot sectors
-          if ! fdisk -l "$ISO_FILE" 2>/dev/null | grep -q "Boot"; then
-            echo "⚠️  ISO missing boot sectors - applying isohybrid..."
-            
-            # Apply isohybrid to make it bootable from USB/CD
-            if command -v isohybrid >/dev/null 2>&1; then
-              sudo isohybrid "$ISO_FILE" 2>/dev/null && echo "✅ isohybrid applied successfully" || echo "⚠️  isohybrid had issues but continuing..."
-            fi
-            
-            # Verify it's now bootable
-            echo "=== Final boot sector check ==="
-            fdisk -l "$ISO_FILE" 2>/dev/null | head -10 || echo "Could not check boot sectors"
-          else
-            echo "✅ ISO already has boot sectors"
-          fi
-        fi
+        cd ubuntu-live
+        sudo lb build
 
-    - name: Rename and prepare ISO
+    - name: Find and prepare ISO
       run: |
-        cd live-build
-        TIMESTAMP=$(date +%Y%m%d-%H%M)
-        
-        # Find the ISO file
+        cd ubuntu-live
+        # Find the built ISO
         ISO_FILE=$(find . -name "*.iso" -type f | head -1)
-        if [ -n "$ISO_FILE" ]; then
-          echo "Found ISO file: $ISO_FILE"
-          cp "$ISO_FILE" "ubuntu-live-custom-${TIMESTAMP}.iso"
-          # Generate checksum
-          sha256sum "ubuntu-live-custom-${TIMESTAMP}.iso" > "ubuntu-live-custom-${TIMESTAMP}.iso.sha256"
-          echo "Final ISO details:"
-          ls -lh *.iso*
-        else
-          echo "No ISO file found for renaming!"
+        
+        if [ -z "$ISO_FILE" ]; then
+          echo "No ISO file found!"
+          ls -la
           exit 1
         fi
+        
+        echo "Found ISO: $ISO_FILE"
+        
+        # Create timestamped name
+        TIMESTAMP=$(date +%Y%m%d-%H%M)
+        FINAL_ISO="ubuntu-live-custom-${TIMESTAMP}.iso"
+        
+        # Copy and create checksum
+        cp "$ISO_FILE" "$FINAL_ISO"
+        sha256sum "$FINAL_ISO" > "${FINAL_ISO}.sha256"
+        
+        echo "Final ISO created: $FINAL_ISO"
+        ls -lh *.iso*
 
-    - name: Upload ISO as artifact
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ubuntu-live-iso
-        path: |
-          live-build/*.iso
-          live-build/*.sha256
-          live-build/build.log
+        path: ubuntu-live/*.iso*
         retention-days: 30
 
-    - name: Create release (on tag)
+    - name: Create release on tag
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
-        files: |
-          live-build/*.iso
-          live-build/*.sha256
+        files: ubuntu-live/*.iso*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
