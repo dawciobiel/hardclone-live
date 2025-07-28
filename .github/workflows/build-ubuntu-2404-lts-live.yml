@@ -1,4 +1,4 @@
-name: Build Ubuntu 24.04 Live ISO
+name: Build Ubuntu 24.04 Live ISO with KDE
 
 on:
   workflow_dispatch:
@@ -24,30 +24,59 @@ jobs:
             syslinux-utils \
             wget \
             sudo \
-            rsync
+            rsync \
+            systemd-sysv
 
       - name: Create working directories
         run: |
           mkdir -p ~/live-build/{chroot,iso}
 
-      - name: Bootstrap minimal Ubuntu system
+      - name: Bootstrap Ubuntu 24.04 (noble)
         run: |
           debootstrap --arch=amd64 noble ~/live-build/chroot http://archive.ubuntu.com/ubuntu/
 
-      - name: Customize chroot (install apps, etc.)
+      - name: Configure chroot (KDE + live user)
         run: |
           echo '#!/bin/bash
+
+          export DEBIAN_FRONTEND=noninteractive
+
           apt update
-          apt install -y ubuntu-standard casper network-manager
+          apt install -y \
+            ubuntu-standard \
+            casper \
+            network-manager \
+            sudo \
+            kde-plasma-desktop \
+            sddm \
+            xinit
+
+          # Create live user
+          useradd -m -s /bin/bash liveuser
+          echo "liveuser:live" | chpasswd
+          usermod -aG sudo liveuser
+
+          # Auto-login
+          mkdir -p /etc/sddm.conf.d
+          echo "[Autologin]
+          User=liveuser
+          Session=plasma.desktop" > /etc/sddm.conf.d/autologin.conf
+
+          systemctl enable sddm
+
           apt clean
           ' > ~/live-build/chroot/customize.sh
+
           chmod +x ~/live-build/chroot/customize.sh
+          mount --bind /dev ~/live-build/chroot/dev
           chroot ~/live-build/chroot /customize.sh
+          umount ~/live-build/chroot/dev
           rm ~/live-build/chroot/customize.sh
 
       - name: Prepare ISO structure
         run: |
-          mkdir -p ~/live-build/iso/{casper,boot/grub}
+          mkdir -p ~/live-build/iso/{casper,boot/grub,isolinux}
+
           cp /usr/lib/ISOLINUX/isolinux.bin ~/live-build/iso/isolinux/
           cp /usr/lib/syslinux/modules/bios/* ~/live-build/iso/isolinux/
 
@@ -59,27 +88,27 @@ jobs:
           touch ~/live-build/iso/casper/filesystem.manifest
           touch ~/live-build/iso/casper/filesystem.size
 
-      - name: Generate grub config
-        run: |
-          cat > ~/live-build/iso/boot/grub/grub.cfg <<EOF
-          set timeout=5
-          menuentry "Ubuntu 24.04 Live" {
-              linux /casper/vmlinuz boot=casper quiet splash ---
-              initrd /casper/initrd
-          }
-          EOF
-
       - name: Copy kernel and initrd
         run: |
           cp ~/live-build/chroot/boot/vmlinuz-* ~/live-build/iso/casper/vmlinuz
           cp ~/live-build/chroot/boot/initrd.img-* ~/live-build/iso/casper/initrd
 
+      - name: Generate GRUB config
+        run: |
+          cat > ~/live-build/iso/boot/grub/grub.cfg <<EOF
+          set timeout=5
+          menuentry "Ubuntu 24.04 Live KDE" {
+              linux /casper/vmlinuz boot=casper quiet splash ---
+              initrd /casper/initrd
+          }
+          EOF
+
       - name: Create the ISO
         run: |
-          grub-mkrescue -o ~/ubuntu-24.04-live.iso ~/live-build/iso
+          grub-mkrescue -o ~/ubuntu-24.04-live-kde.iso ~/live-build/iso
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ubuntu-24.04-live
-          path: ~/ubuntu-24.04-live.iso
+          name: ubuntu-24.04-live-kde
+          path: ~/ubuntu-24.04-live-kde.iso
