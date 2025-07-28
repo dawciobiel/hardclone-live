@@ -195,7 +195,7 @@ jobs:
         
         # Welcome message
         echo "================================================"
-        echo "   Ubuntu 22.04 LTS Live System - Ready!"
+        echo "   Ubuntu 22.04 LTS Live System - Ready!!"
         echo "================================================"
         echo "Username: ubuntu (passwordless sudo access)"
         echo "Build date: $(date)"
