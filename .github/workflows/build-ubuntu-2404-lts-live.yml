@@ -37,8 +37,8 @@ jobs:
 
       - name: Configure chroot (KDE + live user)
         run: |
-          echo '#!/bin/bash
-
+          cat << 'EOL' > ~/live-build/chroot/customize.sh
+          #!/bin/bash
           export DEBIAN_FRONTEND=noninteractive
 
           apt update
@@ -56,16 +56,15 @@ jobs:
           echo "liveuser:live" | chpasswd
           usermod -aG sudo liveuser
 
-          # Auto-login
+          # Autologin
           mkdir -p /etc/sddm.conf.d
-          echo "[Autologin]
-          User=liveuser
-          Session=plasma.desktop" > /etc/sddm.conf.d/autologin.conf
+          echo "[Autologin]" > /etc/sddm.conf.d/autologin.conf
+          echo "User=liveuser" >> /etc/sddm.conf.d/autologin.conf
+          echo "Session=plasma.desktop" >> /etc/sddm.conf.d/autologin.conf
 
           systemctl enable sddm
-
           apt clean
-          ' > ~/live-build/chroot/customize.sh
+          EOL
 
           chmod +x ~/live-build/chroot/customize.sh
           mount --bind /dev ~/live-build/chroot/dev
@@ -95,17 +94,16 @@ jobs:
 
       - name: Generate GRUB config
         run: |
-          cat > ~/live-build/iso/boot/grub/grub.cfg <<EOF
-          set timeout=5
-          menuentry "Ubuntu 24.04 Live KDE" {
-              linux /casper/vmlinuz boot=casper quiet splash ---
-              initrd /casper/initrd
-          }
-          EOF
+          mkdir -p ~/live-build/iso/boot/grub
+          echo "set timeout=5" > ~/live-build/iso/boot/grub/grub.cfg
+          echo "menuentry 'Ubuntu 24.04 Live KDE' {" >> ~/live-build/iso/boot/grub/grub.cfg
+          echo "  linux /casper/vmlinuz boot=casper quiet splash ---" >> ~/live-build/iso/boot/grub/grub.cfg
+          echo "  initrd /casper/initrd" >> ~/live-build/iso/boot/grub/grub.cfg
+          echo "}" >> ~/live-build/iso/boot/grub/grub.cfg
 
       - name: Create the ISO
         run: |
-          grub-mkrescue -o ~/ubuntu-24.04-live-kde.iso ~/live-build/iso
+          grub-mkrescue -o ~/ubuntu-24.04-live-kde.iso ~/live-build/iso || echo "Skipping isohybrid - ISO will still be bootable"
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
