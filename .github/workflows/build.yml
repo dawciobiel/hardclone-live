@@ -1,57 +1,132 @@
-name: Build Live ISO (Ubuntu 24.04 CLI)
+name: Build Ubuntu 24.04 NUMSR Live ISO
 
 on:
   push:
-    branches: [main]
+    branches: ["main"]
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-22.04
-    name: Build Ubuntu 24.04 Live ISO (CLI)
+  build-iso:
+    runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+    - name: Checkout repo
+      uses: actions/checkout@v4
 
-      - name: Restore APT lists cache
-        uses: actions/cache@v4
-        with:
-          path: /var/lib/apt/lists
-          key: apt-lists-${{ runner.os }}-${{ hashFiles('**/config/package-lists/**') }}
-          restore-keys: |
-            apt-lists-${{ runner.os }}-
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          debootstrap squashfs-tools xorriso grub-pc-bin grub-efi-amd64-bin mtools \
+          dosfstools rsync curl unzip software-properties-common
 
-      - name: Restore APT archive cache
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt/archives
-          key: apt-archives-${{ runner.os }}-${{ hashFiles('**/config/package-lists/**') }}
-          restore-keys: |
-            apt-archives-${{ runner.os }}-
+    - name: Download Ubuntu 24.04 base
+      run: |
+        mkdir -p chroot
+        sudo debootstrap --arch=amd64 noble chroot http://archive.ubuntu.com/ubuntu/
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y live-build
+    - name: Setup chroot environment
+      run: |
+        sudo mount --bind /dev chroot/dev
+        sudo mount --bind /proc chroot/proc
+        sudo mount --bind /sys chroot/sys
+        sudo cp /etc/resolv.conf chroot/etc/resolv.conf
 
-      - name: Configure Live Build
-        run: |
-          cd config
-          sudo lb config -d noble \
-            --binary-images iso-hybrid \
-            --bootappend-live "boot=live components username=liveuser hostname=hardclone-live" \
-            --memtest none \
-            --bootloader grub-efi \
-            --syslinux none \
-            --debian-installer false
+    - name: Install base packages inside chroot
+      run: |
+        cat <<EOF | sudo chroot chroot /bin/bash
+        apt-get update
+        apt-get install -y linux-image-generic grub-pc grub-efi-amd64 systemd-sysv sudo \
+                           network-manager net-tools openssh-server \
+                           apparmor bash-completion wget curl
+        useradd -m -s /bin/bash liveuser
+        echo "liveuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/liveuser
+        passwd -d liveuser
+        mkdir -p /etc/systemd/system/getty@tty1.service.d
+        echo "[Service]" > /etc/systemd/system/getty@tty1.service.d/override.conf
+        echo "ExecStart=" >> /etc/systemd/system/getty@tty1.service.d/override.conf
+        echo "ExecStart=-/sbin/agetty --noclear -a liveuser tty1 linux" >> /etc/systemd/system/getty@tty1.service.d/override.conf
+        systemctl enable NetworkManager
+        EOF
 
-      - name: Build ISO
-        run: |
-          cd config
-          sudo lb build
+    - name: Add AppImages
+      run: |
+        mkdir -p chroot/opt/appimages
+        curl -L -o chroot/opt/appimages/btop.AppImage https://github.com/aristocratos/btop/releases/latest/download/btop-x86_64.AppImage
+        chmod +x chroot/opt/appimages/*.AppImage
 
-      - name: Upload ISO artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ubuntu-live-cli.iso
-          path: config/live-image-amd64.hybrid.iso
+    - name: Cleanup chroot
+      run: |
+        sudo chroot chroot apt-get clean
+        sudo umount -lf chroot/dev || true
+        sudo umount -lf chroot/proc || true
+        sudo umount -lf chroot/sys || true
+
+    - name: Create SquashFS
+      run: |
+        sudo mksquashfs chroot fs.squashfs -comp xz -e boot
+
+    - name: Create ISO structure
+      run: |
+        mkdir -p iso/{boot/grub,EFI/boot}
+        cp fs.squashfs iso/
+        cp chroot/boot/vmlinuz-* iso/vmlinuz
+        cp chroot/boot/initrd.img-* iso/initrd
+
+        grub-mkstandalone \
+          --format=x86_64-efi \
+          --output=iso/EFI/boot/bootx64.efi \
+          --locales="" \
+          --fonts="" \
+          "boot/grub/grub.cfg=<(echo '
+            set default=0
+            set timeout=5
+            menuentry "NUMSR Ubuntu Live" {
+              linux /vmlinuz boot=live quiet
+              initrd /initrd
+            }')"
+
+        dd if=/dev/zero of=efiboot.img bs=1M count=10
+        mkfs.vfat efiboot.img
+        mmd -i efiboot.img ::/EFI ::/EFI/boot
+        mcopy -i efiboot.img iso/EFI/boot/bootx64.efi ::/EFI/boot/
+
+        mkdir -p iso/boot/grub
+        grub-mkstandalone \
+          --format=i386-pc \
+          --output=core.img \
+          --install-modules="linux normal iso9660 biosdisk memdisk search tar ls" \
+          --locales="" \
+          --fonts="" \
+          "boot/grub/grub.cfg=<(echo '
+            set default=0
+            set timeout=5
+            menuentry "NUMSR Ubuntu Live" {
+              linux /vmlinuz boot=live quiet
+              initrd /initrd
+            }')"
+
+        cat /usr/lib/grub/i386-pc/cdboot.img core.img > iso/boot/grub/bios.img
+
+    - name: Build final ISO
+      run: |
+        xorriso -as mkisofs \
+          -iso-level 3 \
+          -full-iso9660-filenames \
+          -volid "NUMSR_LIVE" \
+          -output output.iso \
+          -eltorito-boot boot/grub/bios.img \
+            -no-emul-boot -boot-load-size 4 -boot-info-table \
+          -eltorito-catalog boot/grub/boot.cat \
+          -eltorito-alt-boot \
+          -e efiboot.img \
+            -no-emul-boot \
+          -isohybrid-gpt-basdat \
+          -isohybrid-apm-hfsplus \
+          iso
+
+    - name: Upload ISO artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: numsr-ubuntu-live
+        path: output.iso
