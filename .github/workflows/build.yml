@@ -26,8 +26,9 @@ jobs:
 
       - name: Create working directories
         run: |
-          mkdir -p chroot
+          sudo mkdir -p chroot
           sudo mkdir -p chroot/opt/appimages
+
 
       - name: Bootstrap Ubuntu base system
         run: |
