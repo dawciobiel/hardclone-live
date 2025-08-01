@@ -1,0 +1,41 @@
+name: Minimal Ubuntu Live Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    
+    steps:
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y live-build
+    
+    - name: Create live system
+      run: |
+        mkdir live-ubuntu
+        cd live-ubuntu
+        lb config --distribution jammy
+    
+    - name: Build ISO
+      run: |
+        cd live-ubuntu
+        sudo lb build
+    
+    - name: Find ISO
+      run: |
+        cd live-ubuntu
+        find . -name "*.iso" -exec ls -lh {} \;
+        ISO=$(find . -name "*.iso" | head -1)
+        if [ -n "$ISO" ]; then
+          cp "$ISO" ../ubuntu-live.iso
+          echo "ISO created successfully"
+        fi
+    
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: ubuntu-live
+        path: "*.iso"
