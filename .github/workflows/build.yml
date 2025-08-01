@@ -13,20 +13,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Restore APT cache
+      - name: Restore APT lists cache
+        uses: actions/cache@v4
+        with:
+          path: /var/lib/apt/lists
+          key: apt-lists-${{ runner.os }}-${{ hashFiles('**/config/package-lists/**') }}
+          restore-keys: |
+            apt-lists-${{ runner.os }}-
+
+      - name: Restore APT archive cache
         uses: actions/cache@v4
         with:
           path: /var/cache/apt/archives
-          key: apt-cache-${{ runner.os }}
+          key: apt-archives-${{ runner.os }}-${{ hashFiles('**/config/package-lists/**') }}
           restore-keys: |
-            apt-cache-
+            apt-archives-${{ runner.os }}-
 
-      - name: Install live-build
+      - name: Install dependencies
         run: |
-          sudo apt update
-          sudo apt install -y live-build
+          sudo apt-get update
+          sudo apt-get install -y live-build
 
-      - name: Build ISO
+      - name: Configure Live Build
         run: |
           cd config
           sudo lb config -d noble \
@@ -37,6 +45,9 @@ jobs:
             --syslinux none \
             --debian-installer false
 
+      - name: Build ISO
+        run: |
+          cd config
           sudo lb build
 
       - name: Upload ISO artifact
