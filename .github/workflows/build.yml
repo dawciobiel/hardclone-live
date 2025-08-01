@@ -1,8 +1,8 @@
-name: Build Ubuntu 24.04 NUMSR Live ISO
+name: Build Ubuntu Live ISO
 
 on:
   push:
-    branches: ["main"]
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -10,125 +10,87 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repo
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          debootstrap squashfs-tools xorriso grub-pc-bin grub-efi-amd64-bin mtools \
-          dosfstools rsync curl unzip software-properties-common
+      - name: Set up caching for apt and chroot
+        uses: actions/cache@v4
+        with:
+          path: |
+            /var/cache/apt/archives
+            chroot
+          key: ${{ runner.os }}-ubuntu-chroot-${{ hashFiles('**/build.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-ubuntu-chroot-
 
-    - name: Download Ubuntu 24.04 base
-      run: |
-        mkdir -p chroot
-        sudo debootstrap --arch=amd64 noble chroot http://archive.ubuntu.com/ubuntu/
+      - name: Install required packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y debootstrap squashfs-tools grub-pc-bin grub-efi-amd64-bin xorriso isolinux
 
-    - name: Setup chroot environment
-      run: |
-        sudo mount --bind /dev chroot/dev
-        sudo mount --bind /proc chroot/proc
-        sudo mount --bind /sys chroot/sys
-        sudo cp /etc/resolv.conf chroot/etc/resolv.conf
+      - name: Bootstrap minimal Ubuntu 24.04 (Noble Numbat)
+        run: |
+          sudo debootstrap --arch=amd64 noble chroot http://archive.ubuntu.com/ubuntu
 
-    - name: Install base packages inside chroot
-      run: |
-        cat <<EOF | sudo chroot chroot /bin/bash
-        apt-get update
-        apt-get install -y linux-image-generic grub-efi-amd64 grub-pc-bin systemd-sysv sudo \
-                           network-manager net-tools openssh-server \
-                           apparmor bash-completion wget curl
-        useradd -m -s /bin/bash liveuser
-        echo "liveuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/liveuser
-        passwd -d liveuser
-        mkdir -p /etc/systemd/system/getty@tty1.service.d
-        cat <<EOL > /etc/systemd/system/getty@tty1.service.d/override.conf
-        [Service]
-        ExecStart=
-        ExecStart=-/sbin/agetty --noclear -a liveuser tty1 linux
-        EOL
-        systemctl enable NetworkManager
-        EOF
+      - name: Set up chroot environment
+        run: |
+          sudo cp /etc/resolv.conf chroot/etc/
+          echo "ubuntu-live" | sudo tee chroot/etc/hostname
+          echo "root:live" | sudo chroot chroot chpasswd
+          sudo chroot chroot apt-get update
+          sudo chroot chroot apt-get install -y systemd-sysv sudo net-tools network-manager
 
-    - name: Add AppImages
-      run: |
-        mkdir -p chroot/opt/appimages
-        curl -L -o chroot/opt/appimages/btop.AppImage https://github.com/aristocratos/btop/releases/latest/download/btop-x86_64.AppImage
-        chmod +x chroot/opt/appimages/*.AppImage
+      - name: Create user with sudo
+        run: |
+          sudo chroot chroot useradd -m -s /bin/bash live
+          echo "live:live" | sudo chroot chroot chpasswd
+          echo "live ALL=(ALL) NOPASSWD: ALL" | sudo tee -a chroot/etc/sudoers.d/live
+          sudo chmod 0440 chroot/etc/sudoers.d/live
 
-    - name: Cleanup chroot
-      run: |
-        sudo chroot chroot apt-get clean
-        sudo umount -lf chroot/dev || true
-        sudo umount -lf chroot/proc || true
-        sudo umount -lf chroot/sys || true
+      - name: Copy AppImages
+        run: |
+          sudo mkdir -p chroot/opt/appimages
+          sudo cp -v appimages/*.AppImage chroot/opt/appimages/
 
-    - name: Create SquashFS
-      run: |
-        sudo mksquashfs chroot fs.squashfs -comp xz -e boot
+      - name: Install GRUB bootloader
+        run: |
+          mkdir -p iso/boot/grub
+          echo 'set timeout=5
+          menuentry "Start Ubuntu Live CLI" {
+              linux /boot/vmlinuz boot=live quiet
+              initrd /boot/initrd.img
+          }' > grub.cfg
+          cp grub.cfg iso/boot/grub/
 
-    - name: Create ISO structure
-      run: |
-        mkdir -p iso/{boot/grub,EFI/boot}
-        cp fs.squashfs iso/
-        cp chroot/boot/vmlinuz-* iso/vmlinuz
-        cp chroot/boot/initrd.img-* iso/initrd
+      # - name: Secure Boot (commented out for now)
+      #   run: |
+      #     sudo apt-get install -y sbsigntool shim-signed
+      #     # Sign your custom kernel and bootloader here
 
-        grub-mkstandalone \
-          --format=x86_64-efi \
-          --output=iso/EFI/boot/bootx64.efi \
-          --locales="" \
-          --fonts="" \
-          "boot/grub/grub.cfg=<(echo '
-            set default=0
-            set timeout=5
-            menuentry \"NUMSR Ubuntu Live\" {
-              linux /vmlinuz boot=live quiet
-              initrd /initrd
-            }')"
+      - name: Create SquashFS from chroot
+        run: |
+          sudo mksquashfs chroot iso/filesystem.squashfs -e boot
 
-        dd if=/dev/zero of=efiboot.img bs=1M count=10
-        mkfs.vfat efiboot.img
-        mmd -i efiboot.img ::/EFI ::/EFI/boot
-        mcopy -i efiboot.img iso/EFI/boot/bootx64.efi ::/EFI/boot/
+      - name: Copy kernel and initrd
+        run: |
+          sudo cp chroot/boot/vmlinuz* iso/boot/vmlinuz
+          sudo cp chroot/boot/initrd.img* iso/boot/initrd.img
 
-        mkdir -p iso/boot/grub
-        grub-mkstandalone \
-          --format=i386-pc \
-          --output=core.img \
-          --install-modules="linux normal iso9660 biosdisk search tar ls" \
-          --locales="" \
-          --fonts="" \
-          "boot/grub/grub.cfg=<(echo '
-            set default=0
-            set timeout=5
-            menuentry \"NUMSR Ubuntu Live\" {
-              linux /vmlinuz boot=live quiet
-              initrd /initrd
-            }')"
-
-        cat /usr/lib/grub/i386-pc/cdboot.img core.img > iso/boot/grub/bios.img
-
-    - name: Build final ISO
-      run: |
-        xorriso -as mkisofs \
-          -iso-level 3 \
-          -full-iso9660-filenames \
-          -volid "NUMSR_LIVE" \
-          -output output.iso \
-          -eltorito-boot boot/grub/bios.img \
-            -no-emul-boot -boot-load-size 4 -boot-info-table \
-          -eltorito-catalog boot/grub/boot.cat \
-          -eltorito-alt-boot \
-          -e efiboot.img \
+      - name: Create ISO image
+        run: |
+          xorriso -as mkisofs \
+            -iso-level 3 \
+            -full-iso9660-filenames \
+            -volid "UBUNTU_LIVE" \
+            -output ubuntu-live.iso \
+            -eltorito-boot boot/grub/grub.img \
             -no-emul-boot \
-          -isohybrid-gpt-basdat \
-          -isohybrid-apm-hfsplus \
-          iso
+            -boot-load-size 4 \
+            -boot-info-table \
+            iso
 
-    - name: Upload ISO artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: numsr-ubuntu-live
-        path: output.iso
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-live.iso
+          path: ubuntu-live.iso
