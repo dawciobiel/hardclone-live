@@ -32,7 +32,11 @@ jobs:
           sudo lb config -d noble \
             --binary-images iso-hybrid \
             --bootappend-live "boot=live components username=liveuser hostname=hardclone-live" \
-            --memtest none
+            --memtest none \
+            --bootloader grub-efi \
+            --syslinux none \
+            --debian-installer false
+
           sudo lb build
 
       - name: Upload ISO artifact
