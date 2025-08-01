@@ -21,7 +21,11 @@ jobs:
       - name: Build ISO
         run: |
           cd config
-          sudo lb config -d noble --binary-images iso-hybrid --bootappend-live "boot=live components username=liveuser hostname=hardclone-live"
+          sudo lb config -d noble \
+          --binary-images iso-hybrid \
+          --bootappend-live "boot=live components username=liveuser hostname=hardclone-live" \
+          --memtest none
+
           sudo lb build
 
       - name: Upload ISO artifact
