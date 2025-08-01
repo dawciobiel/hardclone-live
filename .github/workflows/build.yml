@@ -13,6 +13,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      - name: Restore APT cache
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-cache-${{ runner.os }}
+          restore-keys: |
+            apt-cache-
+
       - name: Install live-build
         run: |
           sudo apt update
@@ -22,10 +30,9 @@ jobs:
         run: |
           cd config
           sudo lb config -d noble \
-          --binary-images iso-hybrid \
-          --bootappend-live "boot=live components username=liveuser hostname=hardclone-live" \
-          --memtest none
-
+            --binary-images iso-hybrid \
+            --bootappend-live "boot=live components username=liveuser hostname=hardclone-live" \
+            --memtest none
           sudo lb build
 
       - name: Upload ISO artifact
