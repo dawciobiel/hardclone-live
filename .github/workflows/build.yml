@@ -36,16 +36,18 @@ jobs:
       run: |
         cat <<EOF | sudo chroot chroot /bin/bash
         apt-get update
-        apt-get install -y linux-image-generic grub-pc grub-efi-amd64 systemd-sysv sudo \
+        apt-get install -y linux-image-generic grub-efi-amd64 grub-pc-bin systemd-sysv sudo \
                            network-manager net-tools openssh-server \
                            apparmor bash-completion wget curl
         useradd -m -s /bin/bash liveuser
         echo "liveuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/liveuser
         passwd -d liveuser
         mkdir -p /etc/systemd/system/getty@tty1.service.d
-        echo "[Service]" > /etc/systemd/system/getty@tty1.service.d/override.conf
-        echo "ExecStart=" >> /etc/systemd/system/getty@tty1.service.d/override.conf
-        echo "ExecStart=-/sbin/agetty --noclear -a liveuser tty1 linux" >> /etc/systemd/system/getty@tty1.service.d/override.conf
+        cat <<EOL > /etc/systemd/system/getty@tty1.service.d/override.conf
+        [Service]
+        ExecStart=
+        ExecStart=-/sbin/agetty --noclear -a liveuser tty1 linux
+        EOL
         systemctl enable NetworkManager
         EOF
 
@@ -81,7 +83,7 @@ jobs:
           "boot/grub/grub.cfg=<(echo '
             set default=0
             set timeout=5
-            menuentry "NUMSR Ubuntu Live" {
+            menuentry \"NUMSR Ubuntu Live\" {
               linux /vmlinuz boot=live quiet
               initrd /initrd
             }')"
@@ -95,13 +97,13 @@ jobs:
         grub-mkstandalone \
           --format=i386-pc \
           --output=core.img \
-          --install-modules="linux normal iso9660 biosdisk memdisk search tar ls" \
+          --install-modules="linux normal iso9660 biosdisk search tar ls" \
           --locales="" \
           --fonts="" \
           "boot/grub/grub.cfg=<(echo '
             set default=0
             set timeout=5
-            menuentry "NUMSR Ubuntu Live" {
+            menuentry \"NUMSR Ubuntu Live\" {
               linux /vmlinuz boot=live quiet
               initrd /initrd
             }')"
