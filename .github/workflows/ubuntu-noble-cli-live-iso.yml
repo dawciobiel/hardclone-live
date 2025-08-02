@@ -1,4 +1,4 @@
-name: Build Ubuntu Noble CLI Live ISO 21-40
+name: Build Ubuntu Noble CLI Live ISO
 
 on:
   workflow_dispatch:
@@ -18,14 +18,15 @@ jobs:
 
       - name: Bootstrap minimal Ubuntu Noble system
         run: |
-          sudo debootstrap --arch=amd64 noble chroot-dir http://archive.ubuntu.com/ubuntu/
+          sudo debootstrap --arch=amd64 --variant=minbase noble chroot-dir http://archive.ubuntu.com/ubuntu/
 
       - name: Configure system inside chroot
         run: |
           sudo cp /etc/resolv.conf chroot-dir/etc/
+          
           # Mount necessary filesystems
           sudo mount --bind /proc chroot-dir/proc
-          sudo mount --bind /sys chroot-dir/sys
+          sudo mount --bind /sys chroot-dir/sys  
           sudo mount --bind /dev chroot-dir/dev
           sudo mount --bind /dev/pts chroot-dir/dev/pts
           
@@ -36,54 +37,125 @@ jobs:
           sudo chroot chroot-dir /bin/bash -c "
             export DEBIAN_FRONTEND=noninteractive
             apt-get update
-            apt-get install -y linux-image-generic initramfs-tools live-boot sudo systemd-sysv
+            
+            # Install essential packages first
+            apt-get install -y ubuntu-minimal
+            apt-get install -y casper lupin-casper
+            apt-get install -y linux-image-generic
+            apt-get install -y sudo systemd-sysv
             
             # Configure system
             echo 'ubuntu-live' > /etc/hostname
             useradd -m -s /bin/bash liveuser
-            passwd -d liveuser
+            passwd -d liveuser  
             echo 'liveuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
             
-            # Generate initramfs
-            update-initramfs -c -k all
+            # Configure apt to avoid interactive prompts
+            echo 'APT::Get::Assume-Yes \"true\";' > /etc/apt/apt.conf.d/90assumeyes
+            
+            # Clean up
+            apt-get clean
+            rm -rf /var/lib/apt/lists/*
           "
+
+      - name: Generate initrd manually if needed
+        run: |
+          # Check if initrd was generated
+          if [ ! -f chroot-dir/boot/initrd.img-* ]; then
+            echo "No initrd found, generating manually..."
+            sudo chroot chroot-dir /bin/bash -c "
+              export DEBIAN_FRONTEND=noninteractive
+              
+              # Install initramfs-tools if not present
+              apt-get update
+              apt-get install -y initramfs-tools
+              
+              # Find kernel version
+              KERNEL_VERSION=\$(ls /lib/modules/ | head -n1)
+              echo \"Found kernel: \$KERNEL_VERSION\"
+              
+              # Create initramfs configuration
+              echo 'MODULES=most' > /etc/initramfs-tools/initramfs.conf
+              echo 'BOOT=casper' >> /etc/initramfs-tools/initramfs.conf
+              echo 'COMPRESS=gzip' >> /etc/initramfs-tools/initramfs.conf
+              
+              # Generate initramfs
+              if [ -n \"\$KERNEL_VERSION\" ]; then
+                mkinitramfs -o /boot/initrd.img-\$KERNEL_VERSION \$KERNEL_VERSION
+              fi
+            "
+          fi
 
       - name: Prepare ISO directory
         run: |
-          mkdir -p live-iso/iso/{boot/grub,casper}
+          mkdir -p live-iso/iso/{boot/grub,casper,.disk}
+          
+          # Create .disk info files
+          echo "Ubuntu Noble CLI Live" | sudo tee live-iso/iso/.disk/info
+          echo "noble" | sudo tee live-iso/iso/.disk/release_notes_url
 
       - name: Copy kernel and initrd
         run: |
-          sudo cp chroot-dir/boot/vmlinuz-* live-iso/iso/casper/vmlinuz
-          sudo cp chroot-dir/boot/initrd.img-* live-iso/iso/casper/initrd
+          # Find and copy kernel files
+          if ls chroot-dir/boot/vmlinuz-* 1> /dev/null 2>&1; then
+            sudo cp chroot-dir/boot/vmlinuz-* live-iso/iso/casper/vmlinuz
+            echo "Copied vmlinuz"
+          else
+            echo "No vmlinuz found!"
+            exit 1
+          fi
+          
+          if ls chroot-dir/boot/initrd.img-* 1> /dev/null 2>&1; then
+            sudo cp chroot-dir/boot/initrd.img-* live-iso/iso/casper/initrd
+            echo "Copied initrd"
+          else
+            echo "No initrd found!"
+            exit 1
+          fi
 
       - name: Cleanup and unmount
         run: |
           # Cleanup and unmount filesystems
-          sudo umount chroot-dir/dev/pts || true
-          sudo umount chroot-dir/dev || true
-          sudo umount chroot-dir/sys || true
-          sudo umount chroot-dir/proc || true
+          sudo umount chroot-dir/dev/pts 2>/dev/null || true
+          sudo umount chroot-dir/dev 2>/dev/null || true
+          sudo umount chroot-dir/sys 2>/dev/null || true
+          sudo umount chroot-dir/proc 2>/dev/null || true
+
+      - name: Create filesystem manifest  
+        run: |
+          sudo chroot chroot-dir dpkg-query -W --showformat='${Package} ${Version}\n' | sudo tee live-iso/iso/casper/filesystem.manifest
+          sudo cp live-iso/iso/casper/filesystem.manifest live-iso/iso/casper/filesystem.manifest-desktop
 
       - name: Create grub.cfg
         run: |
           cat > live-iso/iso/boot/grub/grub.cfg << 'EOF'
           set default=0
-          set timeout=5
+          set timeout=10
 
           menuentry "Ubuntu Noble CLI (Live)" {
-              linux /casper/vmlinuz boot=live quiet
+              linux /casper/vmlinuz boot=casper quiet splash
+              initrd /casper/initrd
+          }
+          
+          menuentry "Ubuntu Noble CLI (Live) - Safe Mode" {
+              linux /casper/vmlinuz boot=casper quiet splash nomodeset
               initrd /casper/initrd
           }
           EOF
 
-      - name: Compress filesystem.squashfs
+      - name: Create filesystem.squashfs
         run: |
-          sudo mksquashfs chroot-dir live-iso/iso/casper/filesystem.squashfs -e boot
+          sudo mksquashfs chroot-dir live-iso/iso/casper/filesystem.squashfs -e boot -comp xz
+          
+          # Create filesystem.size
+          printf $(sudo du -sx --block-size=1 chroot-dir | cut -f1) | sudo tee live-iso/iso/casper/filesystem.size
 
       - name: Create the ISO
         run: |
-          grub-mkrescue -o ubuntu-noble-cli-live.iso live-iso/iso --compress=xz
+          # Create ISO with GRUB
+          sudo grub-mkrescue -o ubuntu-noble-cli-live.iso live-iso/iso \
+            --compress=xz \
+            -V "Ubuntu Noble CLI Live"
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
