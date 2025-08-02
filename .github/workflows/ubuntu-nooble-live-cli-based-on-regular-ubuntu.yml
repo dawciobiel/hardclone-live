@@ -1,4 +1,4 @@
-name: Build Ubuntu Noble CLI Live ISO based on regular ubuntu base
+name: Build Ubuntu Noble CLI Live ISO
 
 on:
   workflow_dispatch:
@@ -79,11 +79,7 @@ jobs:
             
             # Configure auto-login
             mkdir -p /etc/systemd/system/getty@tty1.service.d
-            cat > /etc/systemd/system/getty@tty1.service.d/override.conf << EOF
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin liveuser --noclear %I \\\$TERM
-EOF
+            printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin liveuser --noclear %%I \$TERM\n' > /etc/systemd/system/getty@tty1.service.d/override.conf
             
             # Configure live-boot
             echo 'export LIVE_USERNAME=liveuser' >> /etc/live/boot.conf
@@ -192,31 +188,7 @@ EOF
           cp /usr/lib/syslinux/modules/bios/libgpl.c32 live-iso/isolinux/
           
           # Create isolinux config
-          cat > live-iso/isolinux/isolinux.cfg << 'EOF'
-DEFAULT live
-LABEL live
-  menu label ^Try Ubuntu without installing
-  kernel /casper/vmlinuz
-  append initrd=/casper/initrd.lz boot=live quiet splash ---
-
-LABEL live-install  
-  menu label ^Install Ubuntu
-  kernel /casper/vmlinuz
-  append initrd=/casper/initrd.lz boot=live only-ubiquity quiet splash ---
-
-LABEL check
-  menu label ^Check disc for defects
-  kernel /casper/vmlinuz
-  append initrd=/casper/initrd.lz boot=live media-check quiet splash ---
-
-LABEL memtest
-  menu label Test ^memory
-  kernel /install/memtest86+
-
-LABEL hd
-  menu label ^Boot from first hard disk
-  localboot 0x80
-EOF
+          printf 'DEFAULT live\nLABEL live\n  menu label ^Try Ubuntu without installing\n  kernel /casper/vmlinuz\n  append initrd=/casper/initrd.lz boot=live quiet splash ---\n\nLABEL live-install\n  menu label ^Install Ubuntu\n  kernel /casper/vmlinuz\n  append initrd=/casper/initrd.lz boot=live only-ubiquity quiet splash ---\n\nLABEL check\n  menu label ^Check disc for defects\n  kernel /casper/vmlinuz\n  append initrd=/casper/initrd.lz boot=live media-check quiet splash ---\n\nLABEL memtest\n  menu label Test ^memory\n  kernel /install/memtest86+\n\nLABEL hd\n  menu label ^Boot from first hard disk\n  localboot 0x80\n' > live-iso/isolinux/isolinux.cfg
 
       - name: Create the ISO
         run: |
