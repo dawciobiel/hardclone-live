@@ -1,11 +1,11 @@
-name: Build Custom Fedora Live ISO with Docker
+name: Fedora Live ISO with Docker v21
 
 on:
   # push:
   #   branches: [ main ]
   # pull_request:
   #   branches: [ main ]
-  workflow_dispatch:
+  workflow_dispatch:  # Tylko ręczne uruchamianie
 
 jobs:
   build-fedora-live:
@@ -268,8 +268,11 @@ jobs:
         mkdir -p /var/cache/live
         mkdir -p /tmp/fedora-build
         
-        # livemedia-creator requires empty output directory
-        rm -rf /build/output
+        # Use temporary directory for livemedia-creator (it requires empty dir)
+        rm -rf /tmp/iso-build
+        mkdir -p /tmp/iso-build
+        
+        # Ensure output directory exists
         mkdir -p /build/output
         
         # Set SELinux to permissive for build (if needed)
@@ -281,13 +284,20 @@ jobs:
         livemedia-creator \
             --ks /build/fedora-custom-live.ks \
             --no-virt \
-            --resultdir /build/output \
+            --resultdir /tmp/iso-build \
             --project="Fedora Live Custom" \
             --make-iso \
             --volid="FedoraLiveCustom" \
             --iso-only \
             --iso-name fedora-live-custom.iso \
-            --logfile /build/livemedia.log
+            --logfile /tmp/iso-build/livemedia.log
+        
+        # Copy results to mounted output directory
+        if [ -f "/tmp/iso-build/fedora-live-custom.iso" ]; then
+            echo "ISO created successfully! Copying to output directory..."
+            cp /tmp/iso-build/fedora-live-custom.iso /build/output/
+            cp /tmp/iso-build/livemedia.log /build/output/build.log
+        fi
         
         if [ -f "/build/output/fedora-live-custom.iso" ]; then
             echo "ISO created successfully!"
@@ -308,8 +318,8 @@ jobs:
         else
             echo "ERROR: ISO build failed!"
             echo "Build log:"
-            tail -50 /build/livemedia.log 2>/dev/null || true
-            tail -50 /build/build.log 2>/dev/null || true
+            tail -50 /build/output/build.log 2>/dev/null || true
+            tail -50 /tmp/iso-build/livemedia.log 2>/dev/null || true
             exit 1
         fi
         EOF
