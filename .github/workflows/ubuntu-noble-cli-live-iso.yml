@@ -1,0 +1,58 @@
+name: Build Ubuntu Noble CLI Live ISO
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y grub-pc-bin grub-efi-amd64-bin xorriso debootstrap squashfs-tools mtools
+
+      - name: Bootstrap minimal Ubuntu system
+        run: |
+          sudo debootstrap --arch=amd64 noble chroot-dir http://archive.ubuntu.com/ubuntu
+
+      - name: Copy kernel and initrd
+        run: |
+          mkdir -p live-iso/iso/boot
+          cp /boot/vmlinuz-*-generic live-iso/iso/boot/vmlinuz
+          cp /boot/initrd.img-*-generic live-iso/iso/boot/initrd
+
+      - name: Create squashfs filesystem
+        run: |
+          mkdir -p live-iso/iso/casper
+          sudo mksquashfs chroot-dir live-iso/iso/casper/filesystem.squashfs -e boot
+
+      - name: Create grub.cfg
+        run: |
+          mkdir -p live-iso/iso/boot/grub
+          cat > live-iso/iso/boot/grub/grub.cfg <<EOF
+          set default=0
+          set timeout=5
+
+          menuentry "Ubuntu CLI Live" {
+              linux /boot/vmlinuz boot=casper quiet ---
+              initrd /boot/initrd
+          }
+          EOF
+
+      - name: Build ISO
+        run: |
+          grub-mkrescue -o ubuntu-noble-cli-live-iso.iso live-iso/iso --compress=xz
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-noble-cli-live-iso.iso
+          path: ubuntu-noble-cli-live-iso.iso
