@@ -14,46 +14,56 @@ jobs:
       - name: Install required packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y debootstrap grub-pc-bin grub-efi xorriso mtools
+          sudo apt-get install -y debootstrap grub-pc-bin grub-efi xorriso mtools squashfs-tools
 
       - name: Bootstrap minimal Ubuntu system
         run: |
           sudo debootstrap --arch=amd64 noble chroot-dir http://archive.ubuntu.com/ubuntu/
 
-      - name: Configure system
+      - name: Configure system inside chroot
         run: |
           sudo cp /etc/resolv.conf chroot-dir/etc/
           sudo chroot chroot-dir /bin/bash -c "
             apt-get update
-            apt-get install -y linux-image-generic grub-pc-bin grub-efi-amd64-bin sudo systemd-sysv vim
+            apt-get install -y linux-image-generic initramfs-tools live-boot sudo systemd-sysv
             echo 'ubuntu-live' > /etc/hostname
+
             useradd -m -s /bin/bash liveuser
             passwd -d liveuser
             echo 'liveuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
-            echo 'tty1' > /etc/securetty
+
             mkdir -p /etc/systemd/system/getty@tty1.service.d
-            echo '[Service]' > /etc/systemd/system/getty@tty1.service.d/override.conf
-            echo 'ExecStart=' >> /etc/systemd/system/getty@tty1.service.d/override.conf
-            echo 'ExecStart=-/sbin/agetty --autologin liveuser --noclear %I \$TERM' >> /etc/systemd/system/getty@tty1.service.d/override.conf
+            cat > /etc/systemd/system/getty@tty1.service.d/override.conf <<EOF
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin liveuser --noclear %I \$TERM
+EOF
+
+            update-initramfs -c -k all
           "
 
-      - name: Prepare ISO directory structure
+      - name: Create SquashFS image
         run: |
-          mkdir -p live-iso/iso/{boot/grub,casper}
+          sudo mksquashfs chroot-dir squashfs-root/filesystem.squashfs -e boot
+
+      - name: Prepare ISO directory
+        run: |
+          mkdir -p live-iso/iso/{casper,boot/grub}
           sudo cp chroot-dir/boot/vmlinuz* live-iso/iso/casper/vmlinuz
           sudo cp chroot-dir/boot/initrd.img* live-iso/iso/casper/initrd
+          sudo cp squashfs-root/filesystem.squashfs live-iso/iso/casper/
 
       - name: Create grub.cfg
         run: |
           cat <<EOF > live-iso/iso/boot/grub/grub.cfg
-          set default=0
-          set timeout=5
+set default=0
+set timeout=5
 
-          menuentry "Ubuntu Noble CLI Live" {
-              linux /casper/vmlinuz boot=live quiet
-              initrd /casper/initrd
-          }
-          EOF
+menuentry "Ubuntu Noble CLI Live" {
+    linux /casper/vmlinuz boot=live quiet
+    initrd /casper/initrd
+}
+EOF
 
       - name: Build ISO
         run: |
