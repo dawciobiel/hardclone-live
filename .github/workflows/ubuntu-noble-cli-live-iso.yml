@@ -23,27 +23,47 @@ jobs:
       - name: Configure system inside chroot
         run: |
           sudo cp /etc/resolv.conf chroot-dir/etc/
+          # Mount necessary filesystems
+          sudo mount --bind /proc chroot-dir/proc
+          sudo mount --bind /sys chroot-dir/sys
+          sudo mount --bind /dev chroot-dir/dev
+          sudo mount --bind /dev/pts chroot-dir/dev/pts
+          
           # Create override.conf for autologin
           sudo mkdir -p chroot-dir/etc/systemd/system/getty@tty1.service.d
           printf "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin liveuser --noclear %%I \$TERM\n" | sudo tee chroot-dir/etc/systemd/system/getty@tty1.service.d/override.conf
+          
           sudo chroot chroot-dir /bin/bash -c "
+            export DEBIAN_FRONTEND=noninteractive
             apt-get update
             apt-get install -y linux-image-generic initramfs-tools live-boot sudo systemd-sysv
+            
+            # Configure system
             echo 'ubuntu-live' > /etc/hostname
             useradd -m -s /bin/bash liveuser
             passwd -d liveuser
             echo 'liveuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+            
+            # Generate initramfs
+            update-initramfs -c -k all
           "
 
       - name: Prepare ISO directory
         run: |
           mkdir -p live-iso/iso/{boot/grub,casper}
 
-      - name: Create initrd and vmlinuz
+      - name: Copy kernel and initrd
         run: |
-          sudo chroot chroot-dir /bin/bash -c "update-initramfs -c -k all"
           sudo cp chroot-dir/boot/vmlinuz-* live-iso/iso/casper/vmlinuz
           sudo cp chroot-dir/boot/initrd.img-* live-iso/iso/casper/initrd
+
+      - name: Cleanup and unmount
+        run: |
+          # Cleanup and unmount filesystems
+          sudo umount chroot-dir/dev/pts || true
+          sudo umount chroot-dir/dev || true
+          sudo umount chroot-dir/sys || true
+          sudo umount chroot-dir/proc || true
 
       - name: Create grub.cfg
         run: |
