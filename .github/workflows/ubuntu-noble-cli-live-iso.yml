@@ -14,7 +14,7 @@ jobs:
       - name: Install required packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y debootstrap grub-pc-bin grub-efi xorriso mtools squashfs-tools
+          sudo apt-get install -y debootstrap grub-pc-bin grub-efi xorriso mtools
 
       - name: Bootstrap minimal Ubuntu system
         run: |
@@ -27,31 +27,22 @@ jobs:
             apt-get update
             apt-get install -y linux-image-generic initramfs-tools live-boot sudo systemd-sysv
             echo 'ubuntu-live' > /etc/hostname
-
             useradd -m -s /bin/bash liveuser
             passwd -d liveuser
             echo 'liveuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
-
             mkdir -p /etc/systemd/system/getty@tty1.service.d
-            cat > /etc/systemd/system/getty@tty1.service.d/override.conf <<EOF
+            tee /etc/systemd/system/getty@tty1.service.d/override.conf > /dev/null <<EOL
 [Service]
 ExecStart=
 ExecStart=-/sbin/agetty --autologin liveuser --noclear %I \$TERM
-EOF
-
-            update-initramfs -c -k all
+EOL
           "
 
-      - name: Create SquashFS image
+      - name: Prepare ISO directory structure
         run: |
-          sudo mksquashfs chroot-dir squashfs-root/filesystem.squashfs -e boot
-
-      - name: Prepare ISO directory
-        run: |
-          mkdir -p live-iso/iso/{casper,boot/grub}
+          mkdir -p live-iso/iso/{boot/grub,casper}
           sudo cp chroot-dir/boot/vmlinuz* live-iso/iso/casper/vmlinuz
           sudo cp chroot-dir/boot/initrd.img* live-iso/iso/casper/initrd
-          sudo cp squashfs-root/filesystem.squashfs live-iso/iso/casper/
 
       - name: Create grub.cfg
         run: |
