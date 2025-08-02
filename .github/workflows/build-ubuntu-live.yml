@@ -1,83 +1,52 @@
-name: Build Ubuntu CLI Live ISO
+name: Build Ubuntu CLI ISO
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 jobs:
-  build:
+  build-ubuntu-iso:
     runs-on: ubuntu-latest
+    name: Build Custom Ubuntu CLI ISO
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install build tools
         run: |
           sudo apt update
-          sudo apt install -y debootstrap xorriso isolinux squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools
+          sudo apt install -y debootstrap squashfs-tools xorriso grub-pc-bin grub-efi-amd64-bin mtools dosfstools
 
-      - name: Create root filesystem
+      - name: Bootstrap minimal Ubuntu 24.04 system
         run: |
-          sudo debootstrap --arch=amd64 noble chroot http://archive.ubuntu.com/ubuntu
+          sudo debootstrap --arch=amd64 noble chroot http://archive.ubuntu.com/ubuntu/
 
-      - name: Configure chroot
+      - name: Configure system (user, hostname, sudo)
         run: |
-          sudo mount --bind /dev chroot/dev
-          sudo mount --bind /proc chroot/proc
-          sudo mount --bind /sys chroot/sys
-
           sudo chroot chroot /bin/bash -c "
-            export DEBIAN_FRONTEND=noninteractive
-
-            apt update
-            apt install -y linux-image-generic initramfs-tools systemd-sysv sudo apparmor apparmor-utils
-
+            echo 'custom-live' > /etc/hostname
             useradd -m -s /bin/bash ubuntu
             echo 'ubuntu:ubuntu' | chpasswd
             usermod -aG sudo ubuntu
-            echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ubuntu
-
-            update-initramfs -c -k all
-
+            apt update
+            apt install -y sudo systemd-sysv net-tools curl vim
             apt clean
           "
 
-          sudo umount chroot/dev
-          sudo umount chroot/proc
-          sudo umount chroot/sys
-
-      - name: Create ISO directories
+      - name: Prepare ISO root directory
         run: |
-          mkdir -p iso/{boot/grub,boot/isolinux,live}
-          mkdir -p chroot/tmp/initrd
+          mkdir -p iso/{casper,boot/grub}
+          sudo mksquashfs chroot iso/casper/filesystem.squashfs -e boot
+          echo "ubuntu" | sudo tee iso/casper/hostname
+          echo "filesystem.squashfs" | sudo tee iso/casper/filesystem.manifest
 
-      - name: Copy kernel and initrd
-        run: |
-          sudo cp chroot/boot/vmlinuz-* iso/boot/vmlinuz
-          sudo cp chroot/boot/initrd.img-* iso/boot/initrd
+          echo "(hd0) /dev/cdrom" > iso/boot/grub/device.map
+          grub-mkrescue -o ubuntu-live.iso iso
 
-      - name: Create squashfs
-        run: |
-          sudo mksquashfs chroot iso/live/filesystem.squashfs -e boot
-
-      - name: Create grub.cfg
-        run: |
-          cat <<EOF > iso/boot/grub/grub.cfg
-          set default=0
-          set timeout=5
-
-          menuentry "Ubuntu CLI Live" {
-              linux /boot/vmlinuz boot=live quiet
-              initrd /boot/initrd
-          }
-          EOF
-
-      - name: Create ISO image
-        run: |
-          grub-mkrescue -o ubuntu-cli-live.iso iso
-
-      - name: Upload ISO artifact
+      - name: Upload ISO
         uses: actions/upload-artifact@v4
         with:
-          name: ubuntu-cli-live
-          path: ubuntu-cli-live.iso
+          name: ubuntu-live-cli
+          path: ubuntu-live.iso
