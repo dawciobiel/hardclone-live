@@ -28,16 +28,6 @@ jobs:
             unzip \
             python3-pip
 
-      - name: Cache chroot and ISO build directories
-        uses: actions/cache@v4
-        with:
-          path: |
-            chroot
-            work
-          key: ${{ runner.os }}-ubuntu-live-${{ hashFiles('*.yml') }}
-          restore-keys: |
-            ${{ runner.os }}-ubuntu-live-
-
       - name: Download Ubuntu Base
         run: |
           wget -q https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04-base-amd64.tar.gz -O ubuntu-base.tar.gz
@@ -47,75 +37,212 @@ jobs:
           sudo mkdir -p chroot
           sudo tar xpf ubuntu-base.tar.gz -C chroot
 
-      - name: Prepare chroot
+      - name: Prepare chroot environment
         run: |
+          # Copy DNS settings
+          sudo cp /etc/resolv.conf chroot/etc/resolv.conf
+
+          # Mount necessary filesystems
           sudo mount --bind /dev chroot/dev
           sudo mount --bind /run chroot/run
           sudo mount -t proc none chroot/proc
           sudo mount -t sysfs none chroot/sys
-          sudo chroot chroot apt-get update
-          sudo chroot chroot apt-get install -y \
-            systemd-sysv \
-            sudo \
-            netplan.io \
-            openssh-server \
-            vim \
-            cloud-init \
-            cloud-guest-utils \
-            casper \
-            linux-generic \
-            grub-efi \
-            grub-pc \
-            shim-signed \
-            ubuntu-standard
+          sudo mount -t devpts devpts chroot/dev/pts
 
-      - name: Create user
+      - name: Install base packages
         run: |
-          sudo chroot chroot useradd -m -s /bin/bash user
-          echo "user ALL=(ALL) NOPASSWD:ALL" | sudo tee -a chroot/etc/sudoers.d/user
-          echo 'user:user' | sudo chroot chroot chpasswd
+          sudo chroot chroot /bin/bash -c "
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y \
+              systemd-sysv \
+              sudo \
+              netplan.io \
+              openssh-server \
+              vim \
+              casper \
+              lupin-casper \
+              discover \
+              laptop-detect \
+              os-prober \
+              network-manager \
+              resolvconf \
+              net-tools \
+              wireless-tools \
+              wpagui \
+              locales \
+              linux-generic \
+              grub-common \
+              grub-gfxpayload-lists \
+              grub-pc \
+              grub-pc-bin \
+              grub2-common \
+              ubuntu-standard \
+              ubuntu-minimal
+          "
+
+      - name: Configure system
+        run: |
+          sudo chroot chroot /bin/bash -c "
+            # Generate locales
+            locale-gen en_US.UTF-8
+
+            # Create live user
+            useradd -m -s /bin/bash -G adm,cdrom,sudo,dip,plugdev,lpadmin,sambashare ubuntu
+            echo 'ubuntu:ubuntu' | chpasswd
+            echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ubuntu
+
+            # Set hostname
+            echo 'ubuntu-live' > /etc/hostname
+
+            # Configure network
+            cat > /etc/netplan/01-netcfg.yaml << EOF
+network:
+  version: 2
+  renderer: NetworkManager
+  ethernets:
+    eth0:
+      dhcp4: true
+EOF
+          "
 
       - name: Copy AppImages
         run: |
           sudo mkdir -p chroot/opt/appimages
-          sudo cp -v appimages/*.AppImage chroot/opt/appimages || true
-          sudo chroot chroot chmod +x /opt/appimages/*.AppImage || true
+          if [ -d "appimages" ] && [ "$(ls -A appimages/*.AppImage 2>/dev/null)" ]; then
+            sudo cp -v appimages/*.AppImage chroot/opt/appimages/
+            sudo chroot chroot chmod +x /opt/appimages/*.AppImage
+          fi
 
-      - name: Configure bootloader and ISO layout
+      - name: Create ISO structure
         run: |
-          sudo mkdir -p iso/{boot/grub,EFI/boot}
-          sudo cp /usr/lib/grub/i386-pc/* iso/boot/grub/
-          sudo cp /usr/lib/grub/x86_64-efi/* iso/boot/grub/
-          echo 'set default=0' > iso/boot/grub/grub.cfg
-          echo 'set timeout=5' >> iso/boot/grub/grub.cfg
-          echo 'menuentry "Ubuntu Live" { linux /casper/vmlinuz boot=casper quiet splash --- initrd /casper/initrd }' >> iso/boot/grub/grub.cfg
+          sudo mkdir -p iso/{casper,isolinux,install,boot/grub}
 
-      - name: Copy kernel and initrd
+          # Copy kernel and initrd
+          sudo cp chroot/boot/vmlinuz-* iso/casper/vmlinuz
+          sudo cp chroot/boot/initrd.img-* iso/casper/initrd
+
+      - name: Create manifest and size files
         run: |
-          sudo cp chroot/boot/vmlinuz* iso/casper/vmlinuz
-          sudo cp chroot/boot/initrd.img* iso/casper/initrd
+          sudo chroot chroot dpkg-query -W --showformat='${Package} ${Version}\n' | sudo tee iso/casper/filesystem.manifest
+          sudo cp iso/casper/filesystem.manifest iso/casper/filesystem.manifest-desktop
+          sudo sed -i '/ubiquity/d' iso/casper/filesystem.manifest-desktop
+          sudo sed -i '/casper/d' iso/casper/filesystem.manifest-desktop
 
       - name: Create SquashFS
         run: |
           sudo mksquashfs chroot iso/casper/filesystem.squashfs -e boot
+          echo -n $(sudo du -sx --block-size=1 chroot | cut -f1) | sudo tee iso/casper/filesystem.size
 
-      - name: Make ISO
+      - name: Create disk defines
+        run: |
+          cat << EOF | sudo tee iso/README.diskdefines
+#define DISKNAME  Ubuntu Live
+#define TYPE  binary
+#define TYPEbinary  1
+#define ARCH  amd64
+#define ARCHamd64  1
+#define DISKNUM  1
+#define DISKNUM1  1
+#define TOTALNUM  0
+#define TOTALNUM0  1
+EOF
+
+      - name: Configure GRUB
+        run: |
+          cat << 'EOF' | sudo tee iso/boot/grub/grub.cfg
+if loadfont /boot/grub/font.pf2 ; then
+  set gfxmode=auto
+  insmod efi_gop
+  insmod efi_uga
+  insmod gfxterm
+  terminal_output gfxterm
+fi
+
+set menu_color_normal=white/black
+set menu_color_highlight=black/light-gray
+
+menuentry "Try Ubuntu without installing" {
+   linux /casper/vmlinuz boot=casper quiet splash ---
+   initrd /casper/initrd
+}
+
+menuentry "Install Ubuntu" {
+   linux /casper/vmlinuz boot=casper only-ubiquity quiet splash ---
+   initrd /casper/initrd
+}
+
+menuentry "Check disc for defects" {
+   linux /casper/vmlinuz boot=casper integrity-check quiet splash ---
+   initrd /casper/initrd
+}
+
+menuentry "Test memory" {
+   linux16 /install/mt86plus
+}
+EOF
+
+      - name: Create GRUB EFI
+        run: |
+          sudo mkdir -p iso/EFI/boot
+          sudo grub-mkstandalone \
+            --format=x86_64-efi \
+            --output=iso/EFI/boot/bootx64.efi \
+            --locales="" \
+            --fonts="" \
+            "boot/grub/grub.cfg=iso/boot/grub/grub.cfg"
+
+      - name: Create legacy BIOS boot
+        run: |
+          sudo mkdir -p iso/boot/grub/i386-pc
+          sudo grub-mkstandalone \
+            --format=i386-pc \
+            --output=iso/boot/grub/i386-pc/core.img \
+            --install-modules="linux normal iso9660 biosdisk memdisk search tar ls" \
+            --modules="linux normal iso9660 biosdisk search" \
+            --locales="" \
+            --fonts="" \
+            "boot/grub/grub.cfg=iso/boot/grub/grub.cfg"
+
+          sudo cat /usr/lib/grub/i386-pc/cdboot.img iso/boot/grub/i386-pc/core.img > iso/boot/grub/i386-pc/bios.img
+
+      - name: Generate MD5 checksums
+        run: |
+          cd iso && find . -type f -print0 | sudo xargs -0 md5sum | grep -v "\./md5sum.txt" | sudo tee md5sum.txt
+
+      - name: Create ISO
         run: |
           sudo xorriso -as mkisofs \
             -iso-level 3 \
-            -o hardclone-live.iso \
             -full-iso9660-filenames \
-            -volid "HARDCLONE_LIVE" \
-            -eltorito-boot boot/grub/i386-pc/eltorito.img \
-            -no-emul-boot -boot-load-size 4 -boot-info-table \
-            -eltorito-catalog boot/grub/boot.cat \
+            -volid "Ubuntu Live" \
+            -output hardclone-live.iso \
+            -eltorito-boot boot/grub/i386-pc/bios.img \
+            -no-emul-boot \
+            -boot-load-size 4 \
+            -boot-info-table \
+            --eltorito-catalog boot/grub/boot.cat \
+            --grub2-boot-info \
+            --grub2-mbr /usr/lib/grub/i386-pc/boot_hybrid.img \
             -eltorito-alt-boot \
-            -e --interval:appended_partition_2:all:: \
+            -e EFI/boot/bootx64.efi \
             -no-emul-boot \
             -append_partition 2 0xef iso/EFI/boot/bootx64.efi \
-            -isohybrid-gpt-basdat \
-            -isohybrid-apm-hfsplus \
-            iso
+            -m "isolinux/boot.cat" \
+            -m "isolinux/isolinux.bin" \
+            -graft-points \
+               "/EFI/boot/bootx64.efi=iso/EFI/boot/bootx64.efi" \
+               "/boot/grub/bios.img=iso/boot/grub/i386-pc/bios.img" \
+               "."=iso
+
+      - name: Cleanup mounts
+        if: always()
+        run: |
+          sudo umount chroot/dev/pts || true
+          sudo umount chroot/dev || true
+          sudo umount chroot/run || true
+          sudo umount chroot/proc || true
+          sudo umount chroot/sys || true
 
       - name: Compress ISO
         run: zip hardclone-live.zip hardclone-live.iso
