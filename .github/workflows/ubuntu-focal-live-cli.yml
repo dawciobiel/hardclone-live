@@ -1,4 +1,4 @@
-name: Build Ubuntu CLI Live ISO
+name: Ubuntu CLI Live ISO
 
 on:
   workflow_dispatch:
