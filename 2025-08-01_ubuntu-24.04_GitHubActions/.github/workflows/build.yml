@@ -1,0 +1,31 @@
+name: Build Live ISO (Ubuntu 24.04 CLI)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    name: Build Ubuntu 24.04 Live ISO (CLI)
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install live-build
+        run: |
+          sudo apt update
+          sudo apt install -y live-build
+
+      - name: Build ISO
+        run: |
+          cd config
+          sudo lb config -d noble --binary-images iso-hybrid --bootappend-live "boot=live components username=liveuser hostname=hardclone-live"
+          sudo lb build
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-live-cli.iso
+          path: config/live-image-amd64.hybrid.iso
