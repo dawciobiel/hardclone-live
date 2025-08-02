@@ -267,22 +267,17 @@ jobs:
         # Prepare build environment
         mkdir -p /var/cache/live
         mkdir -p /tmp/fedora-build
+        
+        # livemedia-creator requires empty output directory
+        rm -rf /build/output
         mkdir -p /build/output
         
         # Set SELinux to permissive for build (if needed)
         setenforce 0 2>/dev/null || true
         
-        echo "Building Fedora Live ISO..."
+        echo "Building Fedora Live ISO with livemedia-creator..."
         
-        # Build the ISO
-        livecd-creator \
-            --verbose \
-            --config=/build/fedora-custom-live.ks \
-            --fslabel="FedoraLiveCustom" \
-            --cache=/var/cache/live \
-            --tmpdir=/tmp/fedora-build \
-            --logfile=/build/build.log \
-            /build/output/fedora-live-custom.iso || \
+        # Use livemedia-creator (modern method for Fedora 42)
         livemedia-creator \
             --ks /build/fedora-custom-live.ks \
             --no-virt \
@@ -292,7 +287,7 @@ jobs:
             --volid="FedoraLiveCustom" \
             --iso-only \
             --iso-name fedora-live-custom.iso \
-            --logfile /build/build.log
+            --logfile /build/livemedia.log
         
         if [ -f "/build/output/fedora-live-custom.iso" ]; then
             echo "ISO created successfully!"
@@ -313,6 +308,7 @@ jobs:
         else
             echo "ERROR: ISO build failed!"
             echo "Build log:"
+            tail -50 /build/livemedia.log 2>/dev/null || true
             tail -50 /build/build.log 2>/dev/null || true
             exit 1
         fi
@@ -325,10 +321,9 @@ jobs:
         cat > Dockerfile << 'EOF'
         FROM registry.fedoraproject.org/fedora:42
 
-        # Install build dependencies
+        # Install build dependencies  
         RUN dnf update -y && \
             dnf install -y --skip-unavailable \
-                livecd-tools \
                 lorax \
                 anaconda-tui \
                 pykickstart \
@@ -348,7 +343,8 @@ jobs:
                 findutils \
                 dosfstools \
                 e2fsprogs \
-                xfsprogs && \
+                xfsprogs \
+                systemd-container && \
             dnf clean all
 
         # Create working directory
