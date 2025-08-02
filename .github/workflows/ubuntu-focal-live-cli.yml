@@ -34,10 +34,8 @@ jobs:
         run: |
           sudo cp /etc/resolv.conf live-iso/chroot/etc/
           echo "ubuntu-cli-live" | sudo tee live-iso/chroot/etc/hostname
-          sudo tee live-iso/chroot/etc/hosts > /dev/null <<EOF
-127.0.0.1 localhost
-127.0.1.1 ubuntu-cli-live
-EOF
+          echo "127.0.0.1 localhost" | sudo tee live-iso/chroot/etc/hosts
+          echo "127.0.1.1 ubuntu-cli-live" | sudo tee -a live-iso/chroot/etc/hosts
 
       - name: Mount filesystems
         run: |
