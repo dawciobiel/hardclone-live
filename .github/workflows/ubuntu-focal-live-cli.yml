@@ -48,8 +48,8 @@ jobs:
       - name: Copy kernel and initrd
         run: |
           mkdir -p live-iso/iso/boot
-          cp "$(readlink -f /boot/vmlinuz)" live-iso/iso/boot/vmlinuz
-          cp "$(readlink -f /boot/initrd.img)" live-iso/iso/boot/initrd
+          sudo cp "$(readlink -f /boot/vmlinuz)" live-iso/iso/boot/vmlinuz
+          sudo cp "$(readlink -f /boot/initrd.img)" live-iso/iso/boot/initrd
 
       - name: Create grub config
         run: |
