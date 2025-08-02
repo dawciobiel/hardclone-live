@@ -1,4 +1,4 @@
-name: Build Ubuntu Noble CLI Live ISO
+name: Build Ubuntu Noble CLI Live ISO 21-40
 
 on:
   workflow_dispatch:
