@@ -31,7 +31,7 @@ jobs:
           sudo mount -t sysfs /sys chroot-dir/sys
           sudo chroot chroot-dir /bin/bash -c "
             apt-get update &&
-            apt-get install -y linux-image-generic live-boot sudo &&
+            apt-get install -y linux-image-generic casper sudo &&
             useradd -m -s /bin/bash liveuser &&
             echo 'liveuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
           "
@@ -39,6 +39,7 @@ jobs:
           sudo umount -lf chroot-dir/dev
           sudo umount -lf chroot-dir/proc
           sudo umount -lf chroot-dir/sys
+
 
       - name: Create ISO directory structure
         run: |
@@ -64,7 +65,7 @@ jobs:
           set timeout=5
 
           menuentry "Ubuntu Noble CLI Live" {
-              linux /boot/vmlinuz boot=live quiet
+              linux /boot/vmlinuz boot=casper quiet
               initrd /boot/initrd
           }
           EOF
