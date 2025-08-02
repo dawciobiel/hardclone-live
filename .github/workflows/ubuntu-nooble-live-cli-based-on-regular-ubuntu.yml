@@ -16,27 +16,31 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y debootstrap xorriso isolinux squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools wget
 
-      - name: Download Ubuntu Server ISO for kernel and initrd
+      - name: Download Ubuntu Live ISO for reference (optional)
         run: |
-          # Download Ubuntu Server ISO to extract working kernel/initrd
-          wget -O ubuntu-server.iso http://archive.ubuntu.com/ubuntu/dists/noble/main/installer-amd64/current/legacy-images/netboot/mini.iso
+          # Download Ubuntu Desktop Live ISO as reference - but don't fail if not available
+          wget -O ubuntu-desktop.iso http://releases.ubuntu.com/24.04/ubuntu-24.04.1-desktop-amd64.iso || echo "Desktop ISO download failed, continuing..."
 
-      - name: Extract kernel and initrd from server ISO
+      - name: Extract kernel and initrd from ISO (optional)
         run: |
-          # Mount the server ISO to extract kernel/initrd
-          mkdir -p server-mount
-          sudo mount -o loop ubuntu-server.iso server-mount 2>/dev/null || true
-          
-          # Try to find kernel and initrd in the server ISO
-          if [ -f server-mount/linux ]; then
-            cp server-mount/linux ./vmlinuz-server
+          # Try to mount the desktop ISO if available to extract kernel/initrd as backup
+          if [ -f ubuntu-desktop.iso ]; then
+            mkdir -p desktop-mount
+            sudo mount -o loop ubuntu-desktop.iso desktop-mount 2>/dev/null || true
+            
+            # Try to find kernel and initrd in the desktop ISO
+            if [ -f desktop-mount/casper/vmlinuz ]; then
+              cp desktop-mount/casper/vmlinuz ./vmlinuz-backup
+              echo "Found backup kernel"
+            fi
+            if [ -f desktop-mount/casper/initrd ]; then
+              cp desktop-mount/casper/initrd ./initrd-backup
+              echo "Found backup initrd"
+            fi
+            
+            sudo umount desktop-mount 2>/dev/null || true
+            rm -rf desktop-mount
           fi
-          if [ -f server-mount/initrd.gz ]; then
-            cp server-mount/initrd.gz ./initrd-server
-          fi
-          
-          sudo umount server-mount 2>/dev/null || true
-          rm -rf server-mount
 
       - name: Bootstrap Ubuntu Noble system
         run: |
@@ -127,26 +131,28 @@ jobs:
 
       - name: Copy kernel and initrd
         run: |
-          # Copy kernel and initrd from chroot
-          sudo cp chroot-dir/boot/vmlinuz-* live-iso/casper/vmlinuz 2>/dev/null || {
-            echo "No vmlinuz found in chroot, trying server files"
-            if [ -f ./vmlinuz-server ]; then
-              cp ./vmlinuz-server live-iso/casper/vmlinuz
-            else
-              echo "ERROR: No kernel found!"
-              exit 1
-            fi
-          }
+          # Copy kernel and initrd from chroot (primary method)
+          if sudo ls chroot-dir/boot/vmlinuz-* 1>/dev/null 2>&1; then
+            sudo cp chroot-dir/boot/vmlinuz-* live-iso/casper/vmlinuz
+            echo "Copied vmlinuz from chroot"
+          elif [ -f ./vmlinuz-backup ]; then
+            cp ./vmlinuz-backup live-iso/casper/vmlinuz
+            echo "Used backup vmlinuz"
+          else
+            echo "ERROR: No kernel found!"
+            exit 1
+          fi
           
-          sudo cp chroot-dir/boot/initrd.img-* live-iso/casper/initrd.lz 2>/dev/null || {
-            echo "No initrd found in chroot, trying server files"  
-            if [ -f ./initrd-server ]; then
-              cp ./initrd-server live-iso/casper/initrd.lz
-            else
-              echo "ERROR: No initrd found!"
-              exit 1
-            fi
-          }
+          if sudo ls chroot-dir/boot/initrd.img-* 1>/dev/null 2>&1; then
+            sudo cp chroot-dir/boot/initrd.img-* live-iso/casper/initrd.lz
+            echo "Copied initrd from chroot"
+          elif [ -f ./initrd-backup ]; then
+            cp ./initrd-backup live-iso/casper/initrd.lz
+            echo "Used backup initrd"
+          else
+            echo "ERROR: No initrd found!"
+            exit 1
+          fi
 
       - name: Create filesystem manifest
         run: |
