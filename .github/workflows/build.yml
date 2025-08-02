@@ -1,4 +1,4 @@
-name: Build NUMSR Ubuntu Live ISO
+name: Build Ubuntu Live ISO
 
 on:
   workflow_dispatch:
@@ -6,75 +6,122 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up environment
+      - name: Set up dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             debootstrap \
-            squashfs-tools \
             xorriso \
+            isolinux \
+            squashfs-tools \
             grub-pc-bin \
             grub-efi-amd64-bin \
-            mtools
+            mtools \
+            dosfstools \
+            binutils \
+            wget \
+            unzip \
+            python3-pip
 
-      - name: Create working directories
+      - name: Cache chroot and ISO build directories
+        uses: actions/cache@v4
+        with:
+          path: |
+            chroot
+            work
+          key: ${{ runner.os }}-ubuntu-live-${{ hashFiles('*.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-ubuntu-live-
+
+      - name: Download Ubuntu Base
+        run: |
+          wget -q https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04-base-amd64.tar.gz -O ubuntu-base.tar.gz
+
+      - name: Extract Base
         run: |
           sudo mkdir -p chroot
+          sudo tar xpf ubuntu-base.tar.gz -C chroot
+
+      - name: Prepare chroot
+        run: |
+          sudo mount --bind /dev chroot/dev
+          sudo mount --bind /run chroot/run
+          sudo mount -t proc none chroot/proc
+          sudo mount -t sysfs none chroot/sys
+          sudo chroot chroot apt-get update
+          sudo chroot chroot apt-get install -y \
+            systemd-sysv \
+            sudo \
+            netplan.io \
+            openssh-server \
+            vim \
+            cloud-init \
+            cloud-guest-utils \
+            casper \
+            linux-generic \
+            grub-efi \
+            grub-pc \
+            shim-signed \
+            ubuntu-standard
+
+      - name: Create user
+        run: |
+          sudo chroot chroot useradd -m -s /bin/bash user
+          echo "user ALL=(ALL) NOPASSWD:ALL" | sudo tee -a chroot/etc/sudoers.d/user
+          echo 'user:user' | sudo chroot chroot chpasswd
+
+      - name: Copy AppImages
+        run: |
           sudo mkdir -p chroot/opt/appimages
+          sudo cp -v appimages/*.AppImage chroot/opt/appimages || true
+          sudo chroot chroot chmod +x /opt/appimages/*.AppImage || true
 
-
-      - name: Bootstrap Ubuntu base system
+      - name: Configure bootloader and ISO layout
         run: |
-          sudo debootstrap --arch=amd64 focal chroot http://archive.ubuntu.com/ubuntu/
+          sudo mkdir -p iso/{boot/grub,EFI/boot}
+          sudo cp /usr/lib/grub/i386-pc/* iso/boot/grub/
+          sudo cp /usr/lib/grub/x86_64-efi/* iso/boot/grub/
+          echo 'set default=0' > iso/boot/grub/grub.cfg
+          echo 'set timeout=5' >> iso/boot/grub/grub.cfg
+          echo 'menuentry "Ubuntu Live" { linux /casper/vmlinuz boot=casper quiet splash --- initrd /casper/initrd }' >> iso/boot/grub/grub.cfg
 
-      - name: Copy AppImages into chroot
+      - name: Copy kernel and initrd
         run: |
-          sudo cp -rv appimages/*.AppImage chroot/opt/appimages/
+          sudo cp chroot/boot/vmlinuz* iso/casper/vmlinuz
+          sudo cp chroot/boot/initrd.img* iso/casper/initrd
 
-      - name: Prepare ISO root filesystem
+      - name: Create SquashFS
         run: |
-          sudo mksquashfs chroot msr.squashfs -comp xz
+          sudo mksquashfs chroot iso/casper/filesystem.squashfs -e boot
 
-      - name: Create ISO directory structure
+      - name: Make ISO
         run: |
-          mkdir -p msr_desktop/boot/grub
-          cp msr.squashfs msr_desktop/
+          sudo xorriso -as mkisofs \
+            -iso-level 3 \
+            -o hardclone-live.iso \
+            -full-iso9660-filenames \
+            -volid "HARDCLONE_LIVE" \
+            -eltorito-boot boot/grub/i386-pc/eltorito.img \
+            -no-emul-boot -boot-load-size 4 -boot-info-table \
+            -eltorito-catalog boot/grub/boot.cat \
+            -eltorito-alt-boot \
+            -e --interval:appended_partition_2:all:: \
+            -no-emul-boot \
+            -append_partition 2 0xef iso/EFI/boot/bootx64.efi \
+            -isohybrid-gpt-basdat \
+            -isohybrid-apm-hfsplus \
+            iso
 
-      # Secure Boot support disabled for now
-      # - name: Generate Secure Boot keys
-      #   run: |
-      #     mkdir keys
-      #     openssl req -new -x509 -newkey rsa:2048 -keyout keys/platform.key -out keys/platform.crt -days 3650 -nodes -subj "/CN=NUMSR/"
-      #     openssl x509 -outform DER -in keys/platform.crt -out keys/platform.cer
-
-      # - name: Copy keys to ISO
-      #   run: |
-      #     cp -rv keys/* msr_desktop/boot/grub/
-
-      - name: Create GRUB configuration
-        run: |
-          cat > msr_desktop/boot/grub/grub.cfg <<EOF
-          insmod all_video
-          set timeout=5
-          menuentry "NUMSR Ubuntu Live" {
-              linux /casper/vmlinuz boot=casper quiet splash ---
-              initrd /casper/initrd
-          }
-          EOF
-
-      - name: Create ISO image
-        run: |
-          grub-mkrescue -o msr.iso msr_desktop
+      - name: Compress ISO
+        run: zip hardclone-live.zip hardclone-live.iso
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NUMSR-Ubuntu-Live
-          path: msr.iso
+          name: hardclone-live
+          path: hardclone-live.zip
