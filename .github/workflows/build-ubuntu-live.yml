@@ -31,8 +31,8 @@ jobs:
 
       - name: Create working directories
         run: |
-          mkdir -p iso/{boot/grub,live}
-          mkdir -p chroot
+          sudo mkdir -p iso/{boot/grub,live}
+          sudo mkdir -p chroot
 
       - name: Bootstrap Ubuntu CLI system
         run: |
@@ -41,18 +41,24 @@ jobs:
       - name: Configure chroot
         run: |
           sudo cp /etc/resolv.conf chroot/etc/
-          echo "ubuntu-live" | sudo tee chroot/etc/hostname
+          echo "ubuntu-cli" | sudo tee chroot/etc/hostname
           echo "127.0.0.1 localhost" | sudo tee -a chroot/etc/hosts
-          echo "127.0.1.1 ubuntu-live" | sudo tee -a chroot/etc/hosts
+          echo "127.0.1.1 ubuntu-cli" | sudo tee -a chroot/etc/hosts
+
           sudo mount --bind /dev chroot/dev
-          sudo mount --bind /sys chroot/sys
           sudo mount --bind /proc chroot/proc
+          sudo mount --bind /sys chroot/sys
 
           sudo chroot chroot /bin/bash -c "
             export DEBIAN_FRONTEND=noninteractive
 
             apt update
-            apt install -y linux-image-generic systemd-sysv sudo apparmor apparmor-utils
+            apt install -y \
+              linux-image-generic \
+              systemd-sysv \
+              sudo \
+              apparmor \
+              live-boot
 
             useradd -m -s /bin/bash ubuntu
             echo 'ubuntu:ubuntu' | chpasswd
@@ -63,8 +69,8 @@ jobs:
           "
 
           sudo umount chroot/dev
-          sudo umount chroot/sys
           sudo umount chroot/proc
+          sudo umount chroot/sys
 
       - name: Copy kernel and initrd
         run: |
@@ -82,7 +88,7 @@ jobs:
           set timeout=5
 
           menuentry "Ubuntu CLI Live" {
-              linux /boot/vmlinuz boot=live quiet
+              linux /boot/vmlinuz boot=live quiet init=/lib/systemd/systemd
               initrd /boot/initrd
           }
           EOF
