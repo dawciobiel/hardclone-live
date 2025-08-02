@@ -1,0 +1,82 @@
+name: Build Ubuntu CLI ISO with Persistence
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build-ubuntu-iso:
+    runs-on: ubuntu-latest
+    name: Build Ubuntu CLI ISO with persistent support
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install required packages
+        run: |
+          sudo apt update
+          sudo apt install -y debootstrap squashfs-tools xorriso grub-pc-bin grub-efi-amd64-bin mtools dosfstools isolinux syslinux-utils
+
+      - name: Bootstrap Ubuntu 24.04 minimal system
+        run: |
+          sudo debootstrap --arch=amd64 noble chroot http://archive.ubuntu.com/ubuntu/
+
+      - name: Configure system (user, hostname, sudo)
+        run: |
+          sudo chroot chroot /bin/bash -c "
+            echo 'ubuntu-cli' > /etc/hostname
+            echo '127.0.1.1 ubuntu-cli' >> /etc/hosts
+            useradd -m -s /bin/bash ubuntu
+            echo 'ubuntu:ubuntu' | chpasswd
+            usermod -aG sudo ubuntu
+            apt update
+            apt install -y sudo systemd-sysv net-tools curl vim casper
+            apt clean
+          "
+
+      - name: Prepare ISO root structure
+        run: |
+          mkdir -p iso/{casper,boot/grub,isolinux}
+          echo "Ubuntu CLI Live" > iso/.disk/info
+          touch iso/.disk/base_installable
+
+          # Create manifest
+          sudo chroot chroot dpkg-query -W --showformat='${Package} ${Version}\n' > filesystem.manifest
+          cp filesystem.manifest iso/casper/filesystem.manifest
+
+          # Create squashfs
+          sudo mksquashfs chroot iso/casper/filesystem.squashfs -e boot
+
+          # Copy kernel and initrd
+          KERNEL_VERSION=$(ls chroot/boot/vmlinuz-* | sed 's|.*vmlinuz-||')
+          cp chroot/boot/vmlinuz-$KERNEL_VERSION iso/casper/vmlinuz
+          cp chroot/boot/initrd.img-$KERNEL_VERSION iso/casper/initrd
+
+      - name: Create grub config for UEFI/BIOS boot
+        run: |
+          cat <<EOF > iso/boot/grub/grub.cfg
+          set default=0
+          set timeout=5
+
+          menuentry "Ubuntu CLI Live (persistent)" {
+              linux /casper/vmlinuz boot=casper persistent quiet ---
+              initrd /casper/initrd
+          }
+
+          menuentry "Ubuntu CLI Live (non-persistent)" {
+              linux /casper/vmlinuz boot=casper nopersistent quiet ---
+              initrd /casper/initrd
+          }
+EOF
+
+      - name: Create ISO using grub-mkrescue
+        run: |
+          grub-mkrescue -o ubuntu-cli-persistent.iso iso --compress=xz
+
+      - name: Upload ISO as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-cli-persistent
+          path: ubuntu-cli-persistent.iso
