@@ -1,254 +1,86 @@
-name: Build Ubuntu Live ISO
+name: Build Ubuntu CLI Live ISO
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up dependencies
+      - name: Install xorriso and dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            debootstrap \
-            xorriso \
-            isolinux \
-            squashfs-tools \
-            grub-pc-bin \
-            grub-efi-amd64-bin \
-            mtools \
-            dosfstools \
-            binutils \
-            wget \
-            unzip \
-            python3-pip
+          sudo apt-get install -y xorriso isolinux grub-pc-bin grub-efi-amd64-bin debootstrap squashfs-tools mtools dosfstools systemd-container
 
-      - name: Download Ubuntu Base
+      - name: Bootstrap Ubuntu CLI rootfs
         run: |
-          wget -q https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04-base-amd64.tar.gz -O ubuntu-base.tar.gz
+          sudo debootstrap --variant=minbase noble chroot http://archive.ubuntu.com/ubuntu/
+          echo "ubuntu-cli" | sudo tee chroot/etc/hostname
+          echo "127.0.1.1 ubuntu-cli" | sudo tee -a chroot/etc/hosts
 
-      - name: Extract Base
+      - name: Configure minimal system
         run: |
-          sudo mkdir -p chroot
-          sudo tar xpf ubuntu-base.tar.gz -C chroot
-
-      - name: Prepare chroot environment
-        run: |
-          # Copy DNS settings
-          sudo cp /etc/resolv.conf chroot/etc/resolv.conf
-
-          # Mount necessary filesystems
+          sudo cp /etc/resolv.conf chroot/etc/
           sudo mount --bind /dev chroot/dev
-          sudo mount --bind /run chroot/run
-          sudo mount -t proc none chroot/proc
-          sudo mount -t sysfs none chroot/sys
-          sudo mount -t devpts devpts chroot/dev/pts
+          sudo mount --bind /proc chroot/proc
+          sudo mount --bind /sys chroot/sys
 
-      - name: Install base packages
-        run: |
           sudo chroot chroot /bin/bash -c "
-            export DEBIAN_FRONTEND=noninteractive
-            apt-get update
-            apt-get install -y \
-              systemd-sysv \
-              sudo \
-              netplan.io \
-              openssh-server \
-              vim \
-              casper \
-              lupin-casper \
-              discover \
-              laptop-detect \
-              os-prober \
-              network-manager \
-              resolvconf \
-              net-tools \
-              wireless-tools \
-              wpagui \
-              locales \
-              linux-generic \
-              grub-common \
-              grub-gfxpayload-lists \
-              grub-pc \
-              grub-pc-bin \
-              grub2-common \
-              ubuntu-standard \
-              ubuntu-minimal
+            apt-get update &&
+            apt-get install -y linux-image-generic systemd-sysv sudo openssh-server vim network-manager curl wget ca-certificates less &&
+            echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers &&
+            useradd -m -s /bin/bash ubuntu &&
+            echo 'ubuntu:ubuntu' | chpasswd &&
+            mkdir -p /etc/systemd/system/getty@tty1.service.d &&
+            echo '[Service]' > /etc/systemd/system/getty@tty1.service.d/override.conf &&
+            echo 'ExecStart=' >> /etc/systemd/system/getty@tty1.service.d/override.conf &&
+            echo 'ExecStart=-/sbin/agetty --autologin ubuntu --noclear %I \$TERM' >> /etc/systemd/system/getty@tty1.service.d/override.conf &&
+            systemctl enable NetworkManager
           "
 
-      - name: Configure system
-        run: |
-          sudo chroot chroot /bin/bash -c "
-            # Generate locales
-            locale-gen en_US.UTF-8
+          sudo umount chroot/dev
+          sudo umount chroot/proc
+          sudo umount chroot/sys
 
-            # Create live user
-            useradd -m -s /bin/bash -G adm,cdrom,sudo,dip,plugdev,lpadmin,sambashare ubuntu
-            echo 'ubuntu:ubuntu' | chpasswd
-            echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ubuntu
-
-            # Set hostname
-            echo 'ubuntu-live' > /etc/hostname
-
-            # Configure network
-            cat > /etc/netplan/01-netcfg.yaml << EOF
-network:
-  version: 2
-  renderer: NetworkManager
-  ethernets:
-    eth0:
-      dhcp4: true
-EOF
-          "
-
-      - name: Copy AppImages
+      - name: Add AppImage support directory
         run: |
           sudo mkdir -p chroot/opt/appimages
-          if [ -d "appimages" ] && [ "$(ls -A appimages/*.AppImage 2>/dev/null)" ]; then
-            sudo cp -v appimages/*.AppImage chroot/opt/appimages/
-            sudo chroot chroot chmod +x /opt/appimages/*.AppImage
-          fi
-
-      - name: Create ISO structure
-        run: |
-          sudo mkdir -p iso/{casper,isolinux,install,boot/grub}
-
-          # Copy kernel and initrd
-          sudo cp chroot/boot/vmlinuz-* iso/casper/vmlinuz
-          sudo cp chroot/boot/initrd.img-* iso/casper/initrd
-
-      - name: Create manifest and size files
-        run: |
-          sudo chroot chroot dpkg-query -W --showformat='${Package} ${Version}\n' | sudo tee iso/casper/filesystem.manifest
-          sudo cp iso/casper/filesystem.manifest iso/casper/filesystem.manifest-desktop
-          sudo sed -i '/ubiquity/d' iso/casper/filesystem.manifest-desktop
-          sudo sed -i '/casper/d' iso/casper/filesystem.manifest-desktop
+          echo 'export PATH=/opt/appimages:$PATH' | sudo tee -a chroot/etc/profile.d/appimages.sh
+          sudo chmod +x chroot/etc/profile.d/appimages.sh
 
       - name: Create SquashFS
         run: |
-          sudo mksquashfs chroot iso/casper/filesystem.squashfs -e boot
-          echo -n $(sudo du -sx --block-size=1 chroot | cut -f1) | sudo tee iso/casper/filesystem.size
+          sudo mksquashfs chroot filesystem.squashfs -e boot
 
-      - name: Create disk defines
+      - name: Create ISO directory structure
         run: |
-          cat << EOF | sudo tee iso/README.diskdefines
-#define DISKNAME  Ubuntu Live
-#define TYPE  binary
-#define TYPEbinary  1
-#define ARCH  amd64
-#define ARCHamd64  1
-#define DISKNUM  1
-#define DISKNUM1  1
-#define TOTALNUM  0
-#define TOTALNUM0  1
-EOF
+          mkdir -p iso/{boot/grub,EFI/BOOT}
+          sudo cp chroot/boot/vmlinuz-* iso/boot/vmlinuz
+          sudo cp chroot/boot/initrd.img-* iso/boot/initrd
 
-      - name: Configure GRUB
+          cat <<EOF > iso/boot/grub/grub.cfg
+          set timeout=5
+          menuentry "Ubuntu CLI Live" {
+              linux /boot/vmlinuz boot=live toram nopersistent quiet ---
+              initrd /boot/initrd
+          }
+          EOF
+
+      - name: Build ISO image
         run: |
-          cat << 'EOF' | sudo tee iso/boot/grub/grub.cfg
-if loadfont /boot/grub/font.pf2 ; then
-  set gfxmode=auto
-  insmod efi_gop
-  insmod efi_uga
-  insmod gfxterm
-  terminal_output gfxterm
-fi
-
-set menu_color_normal=white/black
-set menu_color_highlight=black/light-gray
-
-menuentry "Try Ubuntu without installing" {
-   linux /casper/vmlinuz boot=casper quiet splash ---
-   initrd /casper/initrd
-}
-
-menuentry "Install Ubuntu" {
-   linux /casper/vmlinuz boot=casper only-ubiquity quiet splash ---
-   initrd /casper/initrd
-}
-
-menuentry "Check disc for defects" {
-   linux /casper/vmlinuz boot=casper integrity-check quiet splash ---
-   initrd /casper/initrd
-}
-
-menuentry "Test memory" {
-   linux16 /install/mt86plus
-}
-EOF
-
-      - name: Create GRUB EFI
-        run: |
-          sudo mkdir -p iso/EFI/boot
-          sudo grub-mkstandalone \
-            --format=x86_64-efi \
-            --output=iso/EFI/boot/bootx64.efi \
-            --locales="" \
-            --fonts="" \
-            "boot/grub/grub.cfg=iso/boot/grub/grub.cfg"
-
-      - name: Create legacy BIOS boot
-        run: |
-          sudo mkdir -p iso/boot/grub/i386-pc
-          sudo grub-mkstandalone \
-            --format=i386-pc \
-            --output=iso/boot/grub/i386-pc/core.img \
-            --install-modules="linux normal iso9660 biosdisk memdisk search tar ls" \
-            --modules="linux normal iso9660 biosdisk search" \
-            --locales="" \
-            --fonts="" \
-            "boot/grub/grub.cfg=iso/boot/grub/grub.cfg"
-
-          sudo cat /usr/lib/grub/i386-pc/cdboot.img iso/boot/grub/i386-pc/core.img > iso/boot/grub/i386-pc/bios.img
-
-      - name: Generate MD5 checksums
-        run: |
-          cd iso && find . -type f -print0 | sudo xargs -0 md5sum | grep -v "\./md5sum.txt" | sudo tee md5sum.txt
-
-      - name: Create ISO
-        run: |
-          sudo xorriso -as mkisofs \
-            -iso-level 3 \
-            -full-iso9660-filenames \
-            -volid "Ubuntu Live" \
-            -output hardclone-live.iso \
-            -eltorito-boot boot/grub/i386-pc/bios.img \
-            -no-emul-boot \
-            -boot-load-size 4 \
-            -boot-info-table \
-            --eltorito-catalog boot/grub/boot.cat \
-            --grub2-boot-info \
-            --grub2-mbr /usr/lib/grub/i386-pc/boot_hybrid.img \
-            -eltorito-alt-boot \
-            -e EFI/boot/bootx64.efi \
-            -no-emul-boot \
-            -append_partition 2 0xef iso/EFI/boot/bootx64.efi \
-            -m "isolinux/boot.cat" \
-            -m "isolinux/isolinux.bin" \
-            -graft-points \
-               "/EFI/boot/bootx64.efi=iso/EFI/boot/bootx64.efi" \
-               "/boot/grub/bios.img=iso/boot/grub/i386-pc/bios.img" \
-               "."=iso
-
-      - name: Cleanup mounts
-        if: always()
-        run: |
-          sudo umount chroot/dev/pts || true
-          sudo umount chroot/dev || true
-          sudo umount chroot/run || true
-          sudo umount chroot/proc || true
-          sudo umount chroot/sys || true
-
-      - name: Compress ISO
-        run: zip hardclone-live.zip hardclone-live.iso
+          grub-mkrescue -o ubuntu-cli-live.iso iso
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hardclone-live
-          path: hardclone-live.zip
+          name: ubuntu-cli-live
+          path: ubuntu-cli-live.iso
