@@ -50,6 +50,9 @@ jobs:
           mkdir -p live-iso/iso/boot
           sudo cp "$(readlink -f /boot/vmlinuz)" live-iso/iso/boot/vmlinuz
           sudo cp "$(readlink -f /boot/initrd.img)" live-iso/iso/boot/initrd
+          sudo chown -R $USER:$USER live-iso/iso/boot
+          chmod -R a+r live-iso/iso/boot
+
 
       - name: Create grub config
         run: |
