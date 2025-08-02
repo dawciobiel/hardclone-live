@@ -2,76 +2,97 @@ name: Build Ubuntu CLI Live ISO
 
 on:
   push:
-    branches: [ main ]
-  workflow_dispatch:
+    branches:
+      - main
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Install required packages
-      run: |
-        sudo apt update
-        sudo apt install -y debootstrap grub-pc-bin grub-efi-amd64-bin grub-common grub-mkrescue xorriso mtools squashfs-tools
+      - name: Install required packages
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            debootstrap \
+            grub-pc-bin \
+            grub-efi-amd64-bin \
+            grub2-common \
+            xorriso \
+            mtools \
+            squashfs-tools \
+            isolinux \
+            syslinux-common \
+            dosfstools \
+            gdisk
 
-    - name: Create root filesystem
-      run: |
-        sudo debootstrap --arch=amd64 noble chroot http://archive.ubuntu.com/ubuntu
+      - name: Create working directories
+        run: |
+          mkdir -p iso/{boot/grub,live}
+          mkdir -p chroot
 
-    - name: Configure system
-      run: |
-        echo "ubuntu" | sudo tee chroot/etc/hostname
-        echo "root:ubuntu" | sudo chroot chroot chpasswd
-        echo "ubuntu ALL=(ALL) NOPASSWD: ALL" | sudo tee chroot/etc/sudoers.d/ubuntu
-        sudo chroot chroot useradd -m -s /bin/bash ubuntu
-        sudo chroot chroot chpasswd <<< "ubuntu:ubuntu"
-        sudo chroot chroot apt update
-        sudo chroot chroot apt install -y systemd-sysv sudo apparmor bash-completion net-tools curl wget
-        sudo chroot chroot apt clean
+      - name: Bootstrap Ubuntu CLI system
+        run: |
+          sudo debootstrap --arch=amd64 noble chroot http://archive.ubuntu.com/ubuntu/
 
-    - name: Set up AppImage support directory
-      run: |
-        sudo mkdir -p chroot/opt/appimages
-        sudo chown -R root:root chroot/opt
+      - name: Configure chroot
+        run: |
+          sudo cp /etc/resolv.conf chroot/etc/
+          echo "ubuntu-live" | sudo tee chroot/etc/hostname
+          echo "127.0.0.1 localhost" | sudo tee -a chroot/etc/hosts
+          echo "127.0.1.1 ubuntu-live" | sudo tee -a chroot/etc/hosts
+          sudo mount --bind /dev chroot/dev
+          sudo mount --bind /sys chroot/sys
+          sudo mount --bind /proc chroot/proc
 
-    - name: Compress filesystem
-      run: |
-        sudo mksquashfs chroot filesystem.squashfs -e boot
+          sudo chroot chroot /bin/bash -c "
+            export DEBIAN_FRONTEND=noninteractive
 
-    - name: Prepare ISO structure
-      run: |
-        mkdir -p iso/boot/grub
-        sudo cp -vL /boot/vmlinuz* iso/boot/
-        sudo cp -vL /boot/initrd.img* iso/boot/
-        sudo cp -v /usr/lib/grub/i386-pc/* iso/boot/grub/
+            apt update
+            apt install -y linux-image-generic systemd-sysv sudo apparmor apparmor-utils
 
-    - name: Copy compressed rootfs
-      run: |
-        sudo mkdir -p iso/live
-        sudo cp filesystem.squashfs iso/live/
+            useradd -m -s /bin/bash ubuntu
+            echo 'ubuntu:ubuntu' | chpasswd
+            usermod -aG sudo ubuntu
+            echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers.d/ubuntu
 
-    - name: Create GRUB configuration
-      run: |
-        cat <<EOF | sudo tee iso/boot/grub/grub.cfg
-        set default=0
-        set timeout=5
+            apt clean
+          "
 
-        menuentry "Ubuntu CLI Live" {
-            linux /boot/vmlinuz root=/dev/ram0 ramdisk_size=1500000 ip=dhcp rw quiet
-            initrd /boot/initrd.img
-        }
-        EOF
+          sudo umount chroot/dev
+          sudo umount chroot/sys
+          sudo umount chroot/proc
 
-    - name: Build ISO
-      run: |
-        grub-mkrescue -o ubuntu-cli-live.iso iso
+      - name: Copy kernel and initrd
+        run: |
+          sudo cp chroot/boot/vmlinuz-* iso/boot/vmlinuz
+          sudo cp chroot/boot/initrd.img-* iso/boot/initrd
 
-    - name: Upload ISO artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ubuntu-cli-live
-        path: ubuntu-cli-live.iso
+      - name: Create squashfs
+        run: |
+          sudo mksquashfs chroot iso/live/filesystem.squashfs -e boot
+
+      - name: Create GRUB config
+        run: |
+          cat <<EOF | sudo tee iso/boot/grub/grub.cfg
+          set default=0
+          set timeout=5
+
+          menuentry "Ubuntu CLI Live" {
+              linux /boot/vmlinuz boot=live quiet
+              initrd /boot/initrd
+          }
+          EOF
+
+      - name: Build ISO
+        run: |
+          sudo grub-mkrescue -o ubuntu-cli-live.iso iso
+
+      - name: Upload ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-cli-live
+          path: ubuntu-cli-live.iso
