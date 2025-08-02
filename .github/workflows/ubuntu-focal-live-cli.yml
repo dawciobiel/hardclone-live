@@ -54,15 +54,14 @@ jobs:
 
       - name: Create grub config
         run: |
-          sudo tee live-iso/iso/boot/grub/grub.cfg > /dev/null <<EOF
-set default=0
-set timeout=5
-
-menuentry "Ubuntu CLI Live" {
-    linux /boot/vmlinuz boot=live quiet
-    initrd /boot/initrd
-}
-EOF
+          sudo mkdir -p live-iso/iso/boot/grub
+          echo 'set default=0' | sudo tee live-iso/iso/boot/grub/grub.cfg
+          echo 'set timeout=5' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
+          echo '' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
+          echo 'menuentry "Ubuntu CLI Live" {' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
+          echo '    linux /boot/vmlinuz boot=live quiet' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
+          echo '    initrd /boot/initrd' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
+          echo '}' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
 
       - name: Build ISO image
         run: |
