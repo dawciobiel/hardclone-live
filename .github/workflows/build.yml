@@ -2,85 +2,76 @@ name: Build Ubuntu CLI Live ISO
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-
-    permissions:
-      contents: write
+    runs-on: ubuntu-24.04
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Install xorriso and dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xorriso isolinux grub-pc-bin grub-efi-amd64-bin debootstrap squashfs-tools mtools dosfstools systemd-container
+    - name: Install required packages
+      run: |
+        sudo apt update
+        sudo apt install -y debootstrap grub-pc-bin grub-efi-amd64-bin grub-common grub-mkrescue xorriso mtools squashfs-tools
 
-      - name: Bootstrap Ubuntu CLI rootfs
-        run: |
-          sudo debootstrap --variant=minbase noble chroot http://archive.ubuntu.com/ubuntu/
-          echo "ubuntu-cli" | sudo tee chroot/etc/hostname
-          echo "127.0.1.1 ubuntu-cli" | sudo tee -a chroot/etc/hosts
+    - name: Create root filesystem
+      run: |
+        sudo debootstrap --arch=amd64 noble chroot http://archive.ubuntu.com/ubuntu
 
-      - name: Configure minimal system
-        run: |
-          sudo cp /etc/resolv.conf chroot/etc/
-          sudo mount --bind /dev chroot/dev
-          sudo mount --bind /proc chroot/proc
-          sudo mount --bind /sys chroot/sys
+    - name: Configure system
+      run: |
+        echo "ubuntu" | sudo tee chroot/etc/hostname
+        echo "root:ubuntu" | sudo chroot chroot chpasswd
+        echo "ubuntu ALL=(ALL) NOPASSWD: ALL" | sudo tee chroot/etc/sudoers.d/ubuntu
+        sudo chroot chroot useradd -m -s /bin/bash ubuntu
+        sudo chroot chroot chpasswd <<< "ubuntu:ubuntu"
+        sudo chroot chroot apt update
+        sudo chroot chroot apt install -y systemd-sysv sudo apparmor bash-completion net-tools curl wget
+        sudo chroot chroot apt clean
 
-          sudo chroot chroot /bin/bash -c "
-            apt-get update &&
-            apt-get install -y linux-image-generic systemd-sysv sudo openssh-server vim network-manager curl wget ca-certificates less &&
-            echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers &&
-            useradd -m -s /bin/bash ubuntu &&
-            echo 'ubuntu:ubuntu' | chpasswd &&
-            mkdir -p /etc/systemd/system/getty@tty1.service.d &&
-            echo '[Service]' > /etc/systemd/system/getty@tty1.service.d/override.conf &&
-            echo 'ExecStart=' >> /etc/systemd/system/getty@tty1.service.d/override.conf &&
-            echo 'ExecStart=-/sbin/agetty --autologin ubuntu --noclear %I \$TERM' >> /etc/systemd/system/getty@tty1.service.d/override.conf &&
-            systemctl enable NetworkManager
-          "
+    - name: Set up AppImage support directory
+      run: |
+        sudo mkdir -p chroot/opt/appimages
+        sudo chown -R root:root chroot/opt
 
-          sudo umount chroot/dev
-          sudo umount chroot/proc
-          sudo umount chroot/sys
+    - name: Compress filesystem
+      run: |
+        sudo mksquashfs chroot filesystem.squashfs -e boot
 
-      - name: Add AppImage support directory
-        run: |
-          sudo mkdir -p chroot/opt/appimages
-          echo 'export PATH=/opt/appimages:$PATH' | sudo tee -a chroot/etc/profile.d/appimages.sh
-          sudo chmod +x chroot/etc/profile.d/appimages.sh
+    - name: Prepare ISO structure
+      run: |
+        mkdir -p iso/boot/grub
+        sudo cp -vL /boot/vmlinuz* iso/boot/
+        sudo cp -vL /boot/initrd.img* iso/boot/
+        sudo cp -v /usr/lib/grub/i386-pc/* iso/boot/grub/
 
-      - name: Create SquashFS
-        run: |
-          sudo mksquashfs chroot filesystem.squashfs -e boot
+    - name: Copy compressed rootfs
+      run: |
+        sudo mkdir -p iso/live
+        sudo cp filesystem.squashfs iso/live/
 
-      - name: Create ISO directory structure
-        run: |
-          mkdir -p iso/{boot/grub,EFI/BOOT}
-          sudo cp chroot/boot/vmlinuz-* iso/boot/vmlinuz
-          sudo cp chroot/boot/initrd.img-* iso/boot/initrd
+    - name: Create GRUB configuration
+      run: |
+        cat <<EOF | sudo tee iso/boot/grub/grub.cfg
+        set default=0
+        set timeout=5
 
-          cat <<EOF > iso/boot/grub/grub.cfg
-          set timeout=5
-          menuentry "Ubuntu CLI Live" {
-              linux /boot/vmlinuz boot=live toram nopersistent quiet ---
-              initrd /boot/initrd
-          }
-          EOF
+        menuentry "Ubuntu CLI Live" {
+            linux /boot/vmlinuz root=/dev/ram0 ramdisk_size=1500000 ip=dhcp rw quiet
+            initrd /boot/initrd.img
+        }
+        EOF
 
-      - name: Build ISO image
-        run: |
-          grub-mkrescue -o ubuntu-cli-live.iso iso
+    - name: Build ISO
+      run: |
+        grub-mkrescue -o ubuntu-cli-live.iso iso
 
-      - name: Upload ISO artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ubuntu-cli-live
-          path: ubuntu-cli-live.iso
+    - name: Upload ISO artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ubuntu-cli-live
+        path: ubuntu-cli-live.iso
