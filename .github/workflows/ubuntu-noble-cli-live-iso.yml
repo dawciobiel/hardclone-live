@@ -35,6 +35,7 @@ jobs:
 
       - name: Create squashfs filesystem
         run: |
+          mkdir -p live-iso/iso/casper
           sudo mksquashfs chroot-dir live-iso/iso/casper/filesystem.squashfs -e boot
 
       - name: Create grub config
