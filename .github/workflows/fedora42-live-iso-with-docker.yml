@@ -1,4 +1,4 @@
-name: Fedora Live ISO with Docker
+name: Build Custom Fedora Live ISO with Docker
 
 on:
   push:
@@ -40,8 +40,8 @@ jobs:
         rootpw --lock --iscrypted locked
         
         # Official Fedora repositories
-        repo --name=fedora --baseurl=https://download.fedoraproject.org/pub/fedora/linux/releases/39/Everything/x86_64/os/
-        repo --name=updates --baseurl=https://download.fedoraproject.org/pub/fedora/linux/updates/39/Everything/x86_64/
+        repo --name=fedora --baseurl=https://download.fedoraproject.org/pub/fedora/linux/releases/42/Everything/x86_64/os/
+        repo --name=updates --baseurl=https://download.fedoraproject.org/pub/fedora/linux/updates/42/Everything/x86_64/
         
         # Bootloader for UEFI and BIOS
         bootloader --location=mbr --append="rhgb quiet"
@@ -282,7 +282,17 @@ jobs:
             --cache=/var/cache/live \
             --tmpdir=/tmp/fedora-build \
             --logfile=/build/build.log \
-            /build/output/fedora-live-custom.iso
+            /build/output/fedora-live-custom.iso || \
+        livemedia-creator \
+            --ks /build/fedora-custom-live.ks \
+            --no-virt \
+            --resultdir /build/output \
+            --project="Fedora Live Custom" \
+            --make-iso \
+            --volid="FedoraLiveCustom" \
+            --iso-only \
+            --iso-name fedora-live-custom.iso \
+            --logfile /build/build.log
         
         if [ -f "/build/output/fedora-live-custom.iso" ]; then
             echo "ISO created successfully!"
@@ -313,13 +323,12 @@ jobs:
     - name: Create Dockerfile
       run: |
         cat > Dockerfile << 'EOF'
-        FROM registry.fedoraproject.org/fedora:39
+        FROM registry.fedoraproject.org/fedora:42
 
         # Install build dependencies
         RUN dnf update -y && \
-            dnf install -y \
+            dnf install -y --skip-unavailable \
                 livecd-tools \
-                spin-kickstarts \
                 lorax \
                 anaconda-tui \
                 pykickstart \
@@ -336,7 +345,10 @@ jobs:
                 parted \
                 util-linux \
                 git \
-                findutils && \
+                findutils \
+                dosfstools \
+                e2fsprogs \
+                xfsprogs && \
             dnf clean all
 
         # Create working directory
@@ -446,7 +458,7 @@ jobs:
           **Zbudowano używając czystego Dockera z kontenerem Fedory!**
           
           ### 📋 Specyfikacje:
-          - **System**: Fedora 39 (najnowsza)
+          - **System**: Fedora 42 (najnowsza)
           - **Interface**: CLI (linia komend)
           - **Użytkownik**: `fedorauser` (hasło: `fedora`)
           - **Sudo**: Bez hasła
