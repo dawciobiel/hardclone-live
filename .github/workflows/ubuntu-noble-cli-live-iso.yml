@@ -39,8 +39,12 @@ jobs:
       - name: Setup ISO structure
         run: |
           mkdir -p live-iso/iso/{boot/grub,casper}
-          sudo cp chroot-dir/boot/vmlinuz* live-iso/iso/casper/vmlinuz
-          sudo cp chroot-dir/boot/initrd.img* live-iso/iso/casper/initrd
+          VMLINUZ=$(basename $(find chroot-dir/boot -name "vmlinuz-*"))
+          INITRD=$(basename $(find chroot-dir/boot -name "initrd.img-*"))
+          echo "Found kernel: $VMLINUZ"
+          echo "Found initrd: $INITRD"
+          sudo cp chroot-dir/boot/$VMLINUZ live-iso/iso/casper/vmlinuz
+          sudo cp chroot-dir/boot/$INITRD live-iso/iso/casper/initrd
           sudo mksquashfs chroot-dir live-iso/iso/casper/filesystem.squashfs -e boot
 
       - name: Create grub config
