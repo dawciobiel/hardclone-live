@@ -1,9 +1,7 @@
 name: Build Ubuntu CLI Live ISO
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
   build:
@@ -13,38 +11,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install required packages
+      - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y \
-            debootstrap \
-            grub-pc-bin \
-            grub-efi-amd64-bin \
-            grub2-common \
-            xorriso \
-            mtools \
-            squashfs-tools \
-            isolinux \
-            syslinux-common \
-            dosfstools \
-            gdisk
+          sudo apt install -y debootstrap xorriso isolinux squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools
 
-      - name: Create working directories
+      - name: Create root filesystem
         run: |
-          sudo mkdir -p iso/{boot/grub,live}
-          sudo mkdir -p chroot
-
-      - name: Bootstrap Ubuntu CLI system
-        run: |
-          sudo debootstrap --arch=amd64 noble chroot http://archive.ubuntu.com/ubuntu/
+          sudo debootstrap --arch=amd64 noble chroot http://archive.ubuntu.com/ubuntu
 
       - name: Configure chroot
         run: |
-          sudo cp /etc/resolv.conf chroot/etc/
-          echo "ubuntu-cli" | sudo tee chroot/etc/hostname
-          echo "127.0.0.1 localhost" | sudo tee -a chroot/etc/hosts
-          echo "127.0.1.1 ubuntu-cli" | sudo tee -a chroot/etc/hosts
-
           sudo mount --bind /dev chroot/dev
           sudo mount --bind /proc chroot/proc
           sudo mount --bind /sys chroot/sys
@@ -53,17 +30,14 @@ jobs:
             export DEBIAN_FRONTEND=noninteractive
 
             apt update
-            apt install -y \
-              linux-image-generic \
-              systemd-sysv \
-              sudo \
-              apparmor \
-              live-boot
+            apt install -y linux-image-generic initramfs-tools systemd-sysv sudo apparmor apparmor-utils
 
             useradd -m -s /bin/bash ubuntu
             echo 'ubuntu:ubuntu' | chpasswd
             usermod -aG sudo ubuntu
-            echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers.d/ubuntu
+            echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ubuntu
+
+            update-initramfs -c -k all
 
             apt clean
           "
@@ -71,6 +45,11 @@ jobs:
           sudo umount chroot/dev
           sudo umount chroot/proc
           sudo umount chroot/sys
+
+      - name: Create ISO directories
+        run: |
+          mkdir -p iso/{boot/grub,boot/isolinux,live}
+          mkdir -p chroot/tmp/initrd
 
       - name: Copy kernel and initrd
         run: |
@@ -81,23 +60,23 @@ jobs:
         run: |
           sudo mksquashfs chroot iso/live/filesystem.squashfs -e boot
 
-      - name: Create GRUB config
+      - name: Create grub.cfg
         run: |
-          cat <<EOF | sudo tee iso/boot/grub/grub.cfg
+          cat <<EOF > iso/boot/grub/grub.cfg
           set default=0
           set timeout=5
 
           menuentry "Ubuntu CLI Live" {
-              linux /boot/vmlinuz boot=live quiet init=/lib/systemd/systemd
+              linux /boot/vmlinuz boot=live quiet
               initrd /boot/initrd
           }
           EOF
 
-      - name: Build ISO
+      - name: Create ISO image
         run: |
-          sudo grub-mkrescue -o ubuntu-cli-live.iso iso
+          grub-mkrescue -o ubuntu-cli-live.iso iso
 
-      - name: Upload ISO
+      - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
           name: ubuntu-cli-live
