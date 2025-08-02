@@ -1,4 +1,4 @@
-name: Build Ubuntu CLI Live ISO
+name: Build Ubuntu Focal CLI Live ISO
 
 on:
   workflow_dispatch:
@@ -60,17 +60,17 @@ jobs:
           echo 'set default=0' | sudo tee live-iso/iso/boot/grub/grub.cfg
           echo 'set timeout=5' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
           echo '' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
-          echo 'menuentry "Ubuntu CLI Live" {' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
+          echo 'menuentry "Ubuntu Focal CLI Live" {' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
           echo '    linux /boot/vmlinuz boot=live quiet' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
           echo '    initrd /boot/initrd' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
           echo '}' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
 
       - name: Build ISO image
         run: |
-          grub-mkrescue -o ubuntu-cli-live.iso live-iso/iso --compress=xz
+          grub-mkrescue -o ubuntu-focal-cli-live.iso live-iso/iso --compress=xz
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ubuntu-cli-live
-          path: ubuntu-cli-live.iso
+          name: ubuntu-focal-cli-live
+          path: ubuntu-focal-cli-live.iso
