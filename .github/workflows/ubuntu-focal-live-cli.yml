@@ -1,4 +1,4 @@
-name: Ubuntu CLI Live ISO
+name: Build Ubuntu CLI Live ISO
 
 on:
   # push:
@@ -10,82 +10,87 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
-    - name: Checkout repo
-      uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y debootstrap xorriso squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools dosfstools
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            debootstrap xorriso squashfs-tools grub-pc-bin grub-efi-amd64-bin \
+            mtools dosfstools rsync
 
-    - name: Set up working directories
-      run: |
-        mkdir -p iso/{boot/grub,EFI/boot}
-        mkdir -p chroot
+      - name: Create working directories
+        run: |
+          mkdir -p live-iso/{chroot,iso/{boot/grub,EFI/BOOT}}
 
-    - name: Bootstrap minimal Ubuntu CLI
-      run: |
-        sudo debootstrap --variant=minbase focal chroot http://archive.ubuntu.com/ubuntu/
+      - name: Bootstrap Ubuntu system
+        run: |
+          sudo debootstrap --arch=amd64 focal live-iso/chroot http://archive.ubuntu.com/ubuntu/
 
-    - name: Set up basic configs
-      run: |
-        sudo cp /etc/resolv.conf chroot/etc/
-        echo "ubuntu-cli-live" | sudo tee chroot/etc/hostname
-        sudo tee chroot/etc/hosts > /dev/null <<EOF
+      - name: Set up basic configs
+        run: |
+          sudo cp /etc/resolv.conf live-iso/chroot/etc/
+          echo "ubuntu-cli-live" | sudo tee live-iso/chroot/etc/hostname
+          sudo tee live-iso/chroot/etc/hosts > /dev/null <<EOF
 127.0.0.1 localhost
 127.0.1.1 ubuntu-cli-live
 EOF
 
-    - name: Install basic packages and user
-      run: |
-        sudo chroot chroot bash -c "
-          apt-get update
-          apt-get install -y sudo linux-image-generic grub-pc systemd-sysv net-tools \
-                             network-manager openssh-server curl apparmor ca-certificates \
-                             udev initramfs-tools
-          echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ubuntu
-          useradd -m -s /bin/bash ubuntu
-          echo ubuntu:ubuntu | chpasswd
-        "
+      - name: Mount filesystems
+        run: |
+          sudo mount --bind /dev live-iso/chroot/dev
+          sudo mount --bind /sys live-iso/chroot/sys
+          sudo mount --bind /proc live-iso/chroot/proc
 
-    - name: Clean up chroot
-      run: |
-        sudo chroot chroot apt-get clean
-        sudo rm -rf chroot/var/lib/apt/lists/*
+      - name: Install packages in chroot
+        run: |
+          sudo chroot live-iso/chroot /bin/bash -c "
+            apt update &&
+            DEBIAN_FRONTEND=noninteractive apt install -y linux-image-generic sudo grub-pc-bin grub-efi-amd64-bin systemd-sysv net-tools curl &&
+            useradd -m -s /bin/bash ubuntu &&
+            echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+          "
 
-    - name: Build squashfs
-      run: |
-        sudo mksquashfs chroot iso/casper/filesystem.squashfs -e boot
+      - name: Unmount filesystems
+        run: |
+          sudo umount -lf live-iso/chroot/dev || true
+          sudo umount -lf live-iso/chroot/sys || true
+          sudo umount -lf live-iso/chroot/proc || true
 
-    - name: Copy kernel and initrd
-      run: |
-        KERNEL=$(ls chroot/boot/vmlinuz-* | head -n1 | xargs -n1 basename)
-        INITRD=$(ls chroot/boot/initrd.img-* | head -n1 | xargs -n1 basename)
-        sudo cp chroot/boot/$KERNEL iso/casper/vmlinuz
-        sudo cp chroot/boot/$INITRD iso/casper/initrd
+      - name: Create squashfs
+        run: |
+          sudo mksquashfs live-iso/chroot live-iso/iso/filesystem.squashfs -e boot
 
-    - name: Create grub.cfg
-      run: |
-        cat <<EOF | sudo tee iso/boot/grub/grub.cfg
+      - name: Copy kernel and initrd
+        run: |
+          sudo cp live-iso/chroot/boot/vmlinuz-* live-iso/iso/vmlinuz
+          sudo cp live-iso/chroot/boot/initrd.img-* live-iso/iso/initrd
+
+      - name: Create grub config
+        run: |
+          cat <<EOF | sudo tee live-iso/iso/boot/grub/grub.cfg
 set default=0
 set timeout=5
 
 menuentry "Ubuntu CLI Live" {
-    linux /casper/vmlinuz boot=casper quiet ---
-    initrd /casper/initrd
+    linux /vmlinuz boot=live quiet
+    initrd /initrd
 }
 EOF
 
-    - name: Create ISO image
-      run: |
-        grub-mkrescue -o ubuntu-cli-live.iso iso --compress=xz
+      - name: Create EFI bootloader
+        run: |
+          grub-mkimage -o live-iso/iso/EFI/BOOT/BOOTx64.EFI -p /boot/grub -O x86_64-efi part_gpt part_msdos fat iso9660 configfile normal linux echo efi_gop efi_uga gfxterm search search_fs_uuid search_label search_fs_file terminal boot
 
-    - name: Upload ISO artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ubuntu-cli-live
-        path: ubuntu-cli-live.iso
+      - name: Create BIOS bootloader
+        run: |
+          grub-mkrescue -o ubuntu-cli-live.iso live-iso/iso --compress=xz
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-cli-live.iso
+          path: ubuntu-cli-live.iso
