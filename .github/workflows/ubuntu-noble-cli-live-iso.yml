@@ -40,7 +40,6 @@ jobs:
           sudo umount -lf chroot-dir/proc
           sudo umount -lf chroot-dir/sys
 
-
       - name: Create ISO directory structure
         run: |
           mkdir -p live-iso/iso/casper
@@ -50,13 +49,13 @@ jobs:
         run: |
           sudo mksquashfs chroot-dir live-iso/iso/casper/filesystem.squashfs -e boot
 
-      - name: Create kernel symlinks
+      - name: Copy kernel and initrd
         run: |
           KERNEL=$(ls chroot-dir/boot/vmlinuz-* | head -n1 | xargs -n1 basename)
           INITRD=$(ls chroot-dir/boot/initrd.img-* | head -n1 | xargs -n1 basename)
 
-          sudo cp chroot-dir/boot/$KERNEL live-iso/iso/boot/vmlinuz
-          sudo cp chroot-dir/boot/$INITRD live-iso/iso/boot/initrd
+          sudo cp chroot-dir/boot/$KERNEL live-iso/iso/casper/vmlinuz
+          sudo cp chroot-dir/boot/$INITRD live-iso/iso/casper/initrd
 
       - name: Create grub.cfg
         run: |
@@ -65,8 +64,8 @@ jobs:
           set timeout=5
 
           menuentry "Ubuntu Noble CLI Live" {
-              linux /boot/vmlinuz boot=casper quiet
-              initrd /boot/initrd
+              linux /casper/vmlinuz boot=casper quiet ---
+              initrd /casper/initrd
           }
           EOF
 
