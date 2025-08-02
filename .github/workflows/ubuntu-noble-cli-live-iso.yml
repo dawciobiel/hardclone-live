@@ -25,15 +25,8 @@ jobs:
           sudo cp /etc/resolv.conf chroot-dir/etc/
 
           # Create override.conf for autologin
-          mkdir -p override-tmp
-          cat > override-tmp/override.conf <<EOF
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin liveuser --noclear %I \$TERM
-EOF
-
           sudo mkdir -p chroot-dir/etc/systemd/system/getty@tty1.service.d
-          sudo cp override-tmp/override.conf chroot-dir/etc/systemd/system/getty@tty1.service.d/override.conf
+          printf "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin liveuser --noclear %%I \$TERM\n" | sudo tee chroot-dir/etc/systemd/system/getty@tty1.service.d/override.conf
 
           sudo chroot chroot-dir /bin/bash -c "
             apt-get update
@@ -44,20 +37,18 @@ EOF
             echo 'liveuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
           "
 
-      - name: Create initrd and vmlinuz
-        run: |
-          sudo chroot chroot-dir /bin/bash -c "
-            update-initramfs -c -k all
-          "
-          sudo cp chroot-dir/boot/vmlinuz-* live-iso/iso/casper/vmlinuz
-          sudo cp chroot-dir/boot/initrd.img-* live-iso/iso/casper/initrd
-
       - name: Prepare ISO directory
         run: |
           mkdir -p live-iso/iso/{boot/grub,casper}
-          echo "Ubuntu Noble CLI Live ISO" | sudo tee live-iso/iso/README.diskdefines
 
-          # Create grub.cfg
+      - name: Create initrd and vmlinuz
+        run: |
+          sudo chroot chroot-dir /bin/bash -c "update-initramfs -c -k all"
+          sudo cp chroot-dir/boot/vmlinuz-* live-iso/iso/casper/vmlinuz
+          sudo cp chroot-dir/boot/initrd.img-* live-iso/iso/casper/initrd
+
+      - name: Create grub.cfg
+        run: |
           cat > live-iso/iso/boot/grub/grub.cfg <<EOF
 set default=0
 set timeout=5
