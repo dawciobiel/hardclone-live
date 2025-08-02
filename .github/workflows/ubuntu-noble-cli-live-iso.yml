@@ -49,6 +49,14 @@ jobs:
           echo '    initrd /boot/initrd' >> live-iso/iso/boot/grub/grub.cfg
           echo '}' >> live-iso/iso/boot/grub/grub.cfg
 
+      - name: Create kernel symlinks
+        run: |
+          KERNEL=$(ls chroot-dir/boot/vmlinuz-* | head -n1 | xargs -n1 basename)
+          INITRD=$(ls chroot-dir/boot/initrd.img-* | head -n1 | xargs -n1 basename)
+
+          cp chroot-dir/boot/$KERNEL live-iso/iso/boot/vmlinuz
+          cp chroot-dir/boot/$INITRD live-iso/iso/boot/initrd
+
       - name: Create ISO image
         run: |
           grub-mkrescue -o ubuntu-noble-cli-live-iso.iso live-iso/iso --compress=xz
