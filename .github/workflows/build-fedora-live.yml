@@ -1,0 +1,352 @@
+name: Build Custom Fedora Live ISO
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-fedora-live:
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+      options: --privileged
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install build dependencies
+      run: |
+        dnf update -y
+        dnf install -y \
+          livecd-tools \
+          spin-kickstarts \
+          git \
+          wget \
+          curl \
+          squashfs-tools \
+          xorriso \
+          syslinux \
+          genisoimage \
+          isomd5sum \
+          pykickstart \
+          lorax \
+          anaconda-tui
+
+    - name: Create custom kickstart file
+      run: |
+        cat > custom-fedora-live.ks << 'EOF'
+        # Custom Fedora Live USB with Persistence
+        
+        # Use network installation
+        url --url="https://download.fedoraproject.org/pub/fedora/linux/releases/39/Everything/x86_64/os/"
+        
+        # Keyboard layouts
+        keyboard --xlayouts='us'
+        # System language
+        lang en_US.UTF-8
+        
+        # Network information
+        network --bootproto=dhcp --device=link --activate
+        
+        # Root password (will be disabled later)
+        rootpw --lock
+        
+        # System authorization information
+        authselect select sssd
+        
+        # SELinux configuration
+        selinux --enforcing
+        
+        # System timezone
+        timezone America/New_York --utc
+        
+        # System bootloader configuration
+        bootloader --location=mbr --append="rhgb quiet"
+        
+        # Clear the Master Boot Record and partition table
+        clearpart --all
+        
+        # Create partitions for live system
+        part / --fstype="ext4" --size=4096 --grow
+        part swap --size=512
+        
+        # Packages
+        %packages
+        @core
+        @standard
+        
+        # Essential packages
+        kernel
+        kernel-modules
+        kernel-modules-extra
+        
+        # System utilities
+        bash-completion
+        vim
+        nano
+        wget
+        curl
+        git
+        htop
+        tree
+        unzip
+        tar
+        
+        # Network tools
+        NetworkManager
+        NetworkManager-wifi
+        
+        # Live system essentials
+        dracut-live
+        
+        # UEFI support
+        grub2-efi-x64
+        grub2-efi-x64-modules
+        efibootmgr
+        shim-x64
+        
+        # AppImage support
+        fuse
+        fuse-libs
+        
+        # Development tools (optional, remove if not needed)
+        gcc
+        make
+        
+        # Exclude packages to save space
+        -@gnome-desktop
+        -@kde-desktop
+        -@xfce-desktop
+        -libreoffice*
+        -firefox
+        -thunderbird
+        
+        %end
+        
+        # Services to enable
+        services --enabled=NetworkManager,sshd
+        
+        # User creation
+        user --name=liveuser --groups=wheel --password=live --plaintext
+        
+        # Post-installation script
+        %post --nochroot
+        
+        # Copy any custom files from the repository
+        if [ -d /tmp/repo/custom-files ]; then
+            cp -r /tmp/repo/custom-files/* $INSTALL_ROOT/
+        fi
+        
+        %end
+        
+        %post
+        
+        # Configure sudo for liveuser
+        echo "liveuser ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers.d/liveuser
+        chmod 440 /etc/sudoers.d/liveuser
+        
+        # Auto-login configuration for CLI
+        mkdir -p /etc/systemd/system/getty@tty1.service.d
+        cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf << 'AUTOEOF'
+        [Service]
+        ExecStart=
+        ExecStart=-/sbin/agetty -a liveuser --noclear %I $TERM
+        AUTOEOF
+        
+        # Create AppImage directory
+        mkdir -p /home/liveuser/Applications
+        chown liveuser:liveuser /home/liveuser/Applications
+        
+        # Make AppImages executable by default
+        echo 'alias appimage="chmod +x"' >> /home/liveuser/.bashrc
+        
+        # Install custom AppImages if they exist
+        if [ -d /custom-appimages ]; then
+            cp /custom-appimages/*.AppImage /home/liveuser/Applications/ 2>/dev/null || true
+            chmod +x /home/liveuser/Applications/*.AppImage 2>/dev/null || true
+            chown liveuser:liveuser /home/liveuser/Applications/*.AppImage 2>/dev/null || true
+        fi
+        
+        # Install custom DNF packages if they exist
+        if [ -d /custom-packages ]; then
+            dnf install -y /custom-packages/*.rpm 2>/dev/null || true
+        fi
+        
+        # Create persistence preparation script
+        cat > /home/liveuser/setup-persistence.sh << 'PERSISTEOF'
+        #!/bin/bash
+        # Script to set up persistence on a USB drive
+        # Run this after booting from the live USB
+        
+        echo "This script will help set up persistence on your USB drive"
+        echo "WARNING: This will modify your USB drive!"
+        read -p "Continue? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+        
+        # Find the USB device (this is a simplified approach)
+        USB_DEVICE=$(lsblk -no NAME,TRAN | grep usb | head -1 | awk '{print $1}')
+        if [ -z "$USB_DEVICE" ]; then
+            echo "No USB device found"
+            exit 1
+        fi
+        
+        echo "Found USB device: /dev/$USB_DEVICE"
+        
+        # Create persistence partition (simplified - would need more robust implementation)
+        echo "You would need to manually create a persistence partition"
+        echo "and set up the overlay filesystem for full persistence"
+        PERSISTEOF
+        
+        chmod +x /home/liveuser/setup-persistence.sh
+        chown liveuser:liveuser /home/liveuser/setup-persistence.sh
+        
+        # Welcome message
+        cat > /etc/motd << 'MOTDEOF'
+        =====================================
+        Welcome to Custom Fedora Live System
+        =====================================
+        
+        User: liveuser (password: live)
+        Sudo: Available without password
+        
+        AppImages location: ~/Applications/
+        Persistence setup: ~/setup-persistence.sh
+        
+        To add persistence to your USB drive,
+        run: ./setup-persistence.sh
+        
+        =====================================
+        MOTDEOF
+        
+        # Set hostname
+        echo "fedora-live-custom" > /etc/hostname
+        
+        %end
+        EOF
+
+    - name: Create custom-files directory structure
+      run: |
+        mkdir -p custom-files/custom-appimages
+        mkdir -p custom-files/custom-packages
+        
+        # Example: Download a sample AppImage (you can replace this with your own)
+        # wget -O custom-files/custom-appimages/example.AppImage "https://example.com/your-app.AppImage" || true
+
+    - name: Copy custom files to build context
+      run: |
+        # Copy any AppImages from the repository
+        if [ -d "appimages" ]; then
+            cp appimages/*.AppImage custom-files/custom-appimages/ 2>/dev/null || true
+        fi
+        
+        # Copy any RPM packages from the repository
+        if [ -d "packages" ]; then
+            cp packages/*.rpm custom-files/custom-packages/ 2>/dev/null || true
+        fi
+        
+        # Mount custom files for the build process
+        mkdir -p /tmp/repo
+        cp -r . /tmp/repo/
+
+    - name: Build the live ISO
+      run: |
+        # Create output directory
+        mkdir -p /tmp/livecd-output
+        
+        # Build the live CD
+        livecd-creator \
+          --config=custom-fedora-live.ks \
+          --fslabel="FedoraLiveCustom" \
+          --cache=/var/cache/live \
+          --tmpdir=/tmp/livecd-tmp \
+          --logfile=/tmp/livecd.log \
+          /tmp/livecd-output/fedora-live-custom.iso
+        
+        # Alternative method using livemedia-creator if livecd-creator fails
+        if [ ! -f /tmp/livecd-output/fedora-live-custom.iso ]; then
+          echo "Trying alternative build method..."
+          livemedia-creator \
+            --ks custom-fedora-live.ks \
+            --no-virt \
+            --resultdir /tmp/livecd-output \
+            --project="Fedora Live Custom" \
+            --make-iso \
+            --volid="FedoraLiveCustom" \
+            --iso-only \
+            --iso-name fedora-live-custom.iso
+        fi
+
+    - name: Make ISO hybrid (UEFI + BIOS bootable)
+      run: |
+        cd /tmp/livecd-output
+        if [ -f fedora-live-custom.iso ]; then
+          # Make the ISO hybrid bootable (both UEFI and BIOS)
+          isohybrid --uefi fedora-live-custom.iso || true
+          
+          # Generate checksums
+          sha256sum fedora-live-custom.iso > fedora-live-custom.iso.sha256
+          md5sum fedora-live-custom.iso > fedora-live-custom.iso.md5
+          
+          # Get file size
+          ls -lh fedora-live-custom.iso
+        fi
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: fedora-live-custom-iso
+        path: |
+          /tmp/livecd-output/fedora-live-custom.iso
+          /tmp/livecd-output/fedora-live-custom.iso.sha256
+          /tmp/livecd-output/fedora-live-custom.iso.md5
+        retention-days: 30
+
+    - name: Upload build logs
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: build-logs
+        path: |
+          /tmp/livecd.log
+        retention-days: 7
+
+    - name: Create release (on main branch)
+      uses: softprops/action-gh-release@v1
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      with:
+        tag_name: v${{ github.run_number }}
+        name: Fedora Live Custom v${{ github.run_number }}
+        files: |
+          /tmp/livecd-output/fedora-live-custom.iso
+          /tmp/livecd-output/fedora-live-custom.iso.sha256
+          /tmp/livecd-output/fedora-live-custom.iso.md5
+        body: |
+          Custom Fedora Live ISO build #${{ github.run_number }}
+          
+          **Features:**
+          - Based on Fedora 39
+          - Auto-login as 'liveuser' with sudo privileges
+          - UEFI and BIOS bootable
+          - CLI-focused minimal installation
+          - AppImage support included
+          - Custom packages can be added
+          
+          **Usage:**
+          1. Download the ISO file
+          2. Flash to USB using dd, Rufus, or similar tool
+          3. Boot from USB (UEFI or BIOS)
+          4. Auto-login as 'liveuser' (password: live)
+          
+          **Adding Custom Content:**
+          - Place AppImages in the `appimages/` directory
+          - Place RPM packages in the `packages/` directory
+          - Commit and push to trigger a new build
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
