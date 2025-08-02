@@ -40,16 +40,13 @@ jobs:
       - name: Create grub config
         run: |
           mkdir -p live-iso/iso/boot/grub
-          echo '
-set default=0
-set timeout=5
-
-menuentry "Ubuntu CLI Live" {
-    linux /boot/vmlinuz boot=casper quiet ---
-    initrd /boot/initrd
-}
-' > live-iso/iso/boot/grub/grub.cfg
-
+          echo "set default=0" > live-iso/iso/boot/grub/grub.cfg
+          echo "set timeout=5" >> live-iso/iso/boot/grub/grub.cfg
+          echo "" >> live-iso/iso/boot/grub/grub.cfg
+          echo 'menuentry "Ubuntu CLI Live" {' >> live-iso/iso/boot/grub/grub.cfg
+          echo '    linux /boot/vmlinuz boot=casper quiet ---' >> live-iso/iso/boot/grub/grub.cfg
+          echo '    initrd /boot/initrd' >> live-iso/iso/boot/grub/grub.cfg
+          echo '}' >> live-iso/iso/boot/grub/grub.cfg
 
       - name: Create ISO image
         run: |
