@@ -1,79 +1,66 @@
 name: Build Ubuntu Noble CLI Live ISO
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
-  build:
+  build-iso:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install required packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y grub-pc-bin grub-efi-amd64-bin xorriso squashfs-tools dosfstools mtools debootstrap
+          sudo apt-get install -y debootstrap grub-pc-bin grub-efi xorriso mtools
 
-      - name: Bootstrap base system
+      - name: Bootstrap minimal Ubuntu system
         run: |
           sudo debootstrap --arch=amd64 noble chroot-dir http://archive.ubuntu.com/ubuntu/
 
-      - name: Configure base system
+      - name: Configure system
         run: |
           sudo cp /etc/resolv.conf chroot-dir/etc/
-          echo "ubuntu-live" | sudo tee chroot-dir/etc/hostname
-          echo "root:live" | sudo chroot chroot-dir chpasswd
-          echo "live ALL=(ALL) NOPASSWD: ALL" | sudo tee -a chroot-dir/etc/sudoers.d/live
-          sudo chmod 0440 chroot-dir/etc/sudoers.d/live
+          sudo chroot chroot-dir /bin/bash -c "
+            apt-get update
+            apt-get install -y linux-image-generic grub-pc-bin grub-efi-amd64-bin sudo systemd-sysv vim
+            echo 'ubuntu-live' > /etc/hostname
+            useradd -m -s /bin/bash liveuser
+            passwd -d liveuser
+            echo 'liveuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+            echo 'tty1' > /etc/securetty
+            mkdir -p /etc/systemd/system/getty@tty1.service.d
+            echo '[Service]' > /etc/systemd/system/getty@tty1.service.d/override.conf
+            echo 'ExecStart=' >> /etc/systemd/system/getty@tty1.service.d/override.conf
+            echo 'ExecStart=-/sbin/agetty --autologin liveuser --noclear %I \$TERM' >> /etc/systemd/system/getty@tty1.service.d/override.conf
+          "
 
-      - name: Install packages in chroot
-        run: |
-          sudo chroot chroot-dir apt-get update
-          sudo chroot chroot-dir apt-get install -y linux-image-generic casper sudo systemd-sysv
-          sudo chroot chroot-dir apt-get clean
-
-      - name: Setup ISO structure
+      - name: Prepare ISO directory structure
         run: |
           mkdir -p live-iso/iso/{boot/grub,casper}
-          VMLINUZ=$(basename $(find chroot-dir/boot -name "vmlinuz-*"))
-          INITRD=$(basename $(find chroot-dir/boot -name "initrd.img-*"))
-          echo "Found kernel: $VMLINUZ"
-          echo "Found initrd: $INITRD"
-          sudo cp chroot-dir/boot/$VMLINUZ live-iso/iso/casper/vmlinuz
-          sudo cp chroot-dir/boot/$INITRD live-iso/iso/casper/initrd
-          sudo mksquashfs chroot-dir live-iso/iso/casper/filesystem.squashfs -e boot
+          sudo cp chroot-dir/boot/vmlinuz* live-iso/iso/casper/vmlinuz
+          sudo cp chroot-dir/boot/initrd.img* live-iso/iso/casper/initrd
 
-      - name: Create grub config
+      - name: Create grub.cfg
         run: |
           cat <<EOF > live-iso/iso/boot/grub/grub.cfg
           set default=0
           set timeout=5
 
           menuentry "Ubuntu Noble CLI Live" {
-              linux /casper/vmlinuz boot=casper quiet ---
+              linux /casper/vmlinuz boot=live quiet
               initrd /casper/initrd
           }
           EOF
 
-      - name: Fix permissions for ISO contents
-        run: |
-          sudo chown -R $USER:$USER live-iso
-          sudo chmod -R a+rX live-iso
-
-      - name: Debug ISO contents
-        run: |
-          ls -lR live-iso
-
       - name: Build ISO
         run: |
-          grub-mkrescue -o ubuntu-noble-cli-live-iso.iso live-iso/iso --compress=xz
+          grub-mkrescue -o ubuntu-noble-cli-live.iso live-iso/iso --compress=xz
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
           name: ubuntu-noble-cli-live
-          path: ubuntu-noble-cli-live-iso.iso
+          path: ubuntu-noble-cli-live.iso
