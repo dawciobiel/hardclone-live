@@ -30,8 +30,8 @@ jobs:
       - name: Copy kernel and initrd from chroot
         run: |
           mkdir -p live-iso/iso/boot
-          cp chroot-dir/boot/vmlinuz-* live-iso/iso/boot/vmlinuz
-          cp chroot-dir/boot/initrd.img-* live-iso/iso/boot/initrd
+          sudo cp chroot-dir/boot/vmlinuz-* live-iso/iso/boot/vmlinuz
+          sudo cp chroot-dir/boot/initrd.img-* live-iso/iso/boot/initrd
 
       - name: Create squashfs filesystem
         run: |
