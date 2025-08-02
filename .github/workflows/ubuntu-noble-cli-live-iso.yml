@@ -40,18 +40,29 @@ jobs:
             
             # Install essential packages first
             apt-get install -y ubuntu-minimal
-            apt-get install -y casper lupin-casper
-            apt-get install -y linux-image-generic
-            apt-get install -y sudo systemd-sysv
+            apt-get install -y casper lupin-casper live-config live-config-systemd
+            apt-get install -y linux-image-generic linux-firmware
+            apt-get install -y sudo systemd-sysv dbus
+            apt-get install -y keyboard-configuration console-setup
             
             # Configure system
             echo 'ubuntu-live' > /etc/hostname
-            useradd -m -s /bin/bash liveuser
+            echo '127.0.0.1 localhost ubuntu-live' > /etc/hosts
+            
+            # Create live user
+            useradd -m -s /bin/bash -G sudo liveuser
             passwd -d liveuser  
             echo 'liveuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
             
+            # Configure live-config
+            echo 'LIVE_USERNAME=\"liveuser\"' > /etc/live/config.conf
+            echo 'LIVE_HOSTNAME=\"ubuntu-live\"' >> /etc/live/config.conf
+            
             # Configure apt to avoid interactive prompts
             echo 'APT::Get::Assume-Yes \"true\";' > /etc/apt/apt.conf.d/90assumeyes
+            
+            # Generate locales
+            locale-gen en_US.UTF-8
             
             # Clean up
             apt-get clean
@@ -68,7 +79,7 @@ jobs:
               
               # Install initramfs-tools if not present
               apt-get update
-              apt-get install -y initramfs-tools
+              apt-get install -y initramfs-tools busybox-initramfs
               
               # Find kernel version
               KERNEL_VERSION=\$(ls /lib/modules/ | head -n1)
@@ -78,10 +89,16 @@ jobs:
               echo 'MODULES=most' > /etc/initramfs-tools/initramfs.conf
               echo 'BOOT=casper' >> /etc/initramfs-tools/initramfs.conf
               echo 'COMPRESS=gzip' >> /etc/initramfs-tools/initramfs.conf
+              echo 'DEVICE=eth0' >> /etc/initramfs-tools/initramfs.conf
+              
+              # Add casper to modules
+              echo 'casper' >> /etc/initramfs-tools/modules
+              echo 'squashfs' >> /etc/initramfs-tools/modules
+              echo 'overlay' >> /etc/initramfs-tools/modules
               
               # Generate initramfs
               if [ -n \"\$KERNEL_VERSION\" ]; then
-                mkinitramfs -o /boot/initrd.img-\$KERNEL_VERSION \$KERNEL_VERSION
+                update-initramfs -c -k \$KERNEL_VERSION || mkinitramfs -o /boot/initrd.img-\$KERNEL_VERSION \$KERNEL_VERSION
               fi
             "
           fi
@@ -133,22 +150,43 @@ jobs:
           set timeout=10
 
           menuentry "Ubuntu Noble CLI (Live)" {
-              linux /casper/vmlinuz boot=casper quiet splash
+              linux /casper/vmlinuz boot=casper quiet splash live-media-path=/casper/ ignore_uuid
+              initrd /casper/initrd
+          }
+          
+          menuentry "Ubuntu Noble CLI (Live) - Debug Mode" {
+              linux /casper/vmlinuz boot=casper debug live-media-path=/casper/ ignore_uuid
               initrd /casper/initrd
           }
           
           menuentry "Ubuntu Noble CLI (Live) - Safe Mode" {
-              linux /casper/vmlinuz boot=casper quiet splash nomodeset
+              linux /casper/vmlinuz boot=casper quiet splash nomodeset live-media-path=/casper/ ignore_uuid
               initrd /casper/initrd
           }
           EOF
 
       - name: Create filesystem.squashfs
         run: |
-          sudo mksquashfs chroot-dir live-iso/iso/casper/filesystem.squashfs -e boot -comp xz
+          # Remove any existing squashfs
+          sudo rm -f live-iso/iso/casper/filesystem.squashfs
+          
+          # Create squashfs with proper options for live boot
+          sudo mksquashfs chroot-dir live-iso/iso/casper/filesystem.squashfs \
+            -e boot \
+            -comp xz \
+            -Xdict-size 100% \
+            -noappend
           
           # Create filesystem.size
-          printf $(sudo du -sx --block-size=1 chroot-dir | cut -f1) | sudo tee live-iso/iso/casper/filesystem.size
+          printf $(sudo du -sx --block-size=1 chroot-dir | cut -f1) | sudo tee live-iso/iso/casper/filesystem.size > /dev/null
+          
+          # Verify squashfs was created
+          if [ ! -f live-iso/iso/casper/filesystem.squashfs ]; then
+            echo "ERROR: filesystem.squashfs was not created!"
+            exit 1
+          fi
+          
+          echo "filesystem.squashfs size: $(ls -lh live-iso/iso/casper/filesystem.squashfs)"
 
       - name: Create the ISO
         run: |
