@@ -16,7 +16,7 @@ jobs:
       - name: Install required packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y debootstrap squashfs-tools grub-pc-bin grub-efi-amd64-bin xorriso
+          sudo apt-get install -y debootstrap squashfs-tools grub-pc-bin grub-efi-amd64-bin xorriso mtools
 
       - name: Create root filesystem with debootstrap
         run: |
