@@ -6,66 +6,71 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    name: Build Ubuntu Noble CLI ISO
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install required packages
+      - name: Set up environment
         run: |
-          sudo apt-get update
-          sudo apt-get install -y debootstrap xorriso isolinux squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools
+          sudo apt update
+          sudo apt install -y debootstrap xorriso isolinux squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools
 
-      - name: Bootstrap minimal Ubuntu Noble system
+      - name: Create chroot environment
         run: |
-          sudo debootstrap --arch=amd64 noble chroot-dir http://archive.ubuntu.com/ubuntu/
+          sudo debootstrap --variant=minbase noble chroot-dir http://archive.ubuntu.com/ubuntu/
 
       - name: Configure system inside chroot
         run: |
-          sudo cp /etc/resolv.conf chroot-dir/etc/
+          sudo mount --bind /dev chroot-dir/dev
+          sudo mount --bind /proc chroot-dir/proc
+          sudo mount --bind /sys chroot-dir/sys
+          sudo chroot chroot-dir apt update
+          sudo chroot chroot-dir apt install -y linux-image-generic live-boot systemd-sysv sudo
 
-          # Create override.conf for autologin
+      - name: Create liveuser
+        run: |
+          sudo chroot chroot-dir useradd -m -s /bin/bash liveuser
+          sudo chroot chroot-dir usermod -aG sudo liveuser
+          sudo chroot chroot-dir passwd -d liveuser
+
+      - name: Enable autologin
+        run: |
           sudo mkdir -p chroot-dir/etc/systemd/system/getty@tty1.service.d
-          printf "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin liveuser --noclear %%I \$TERM\n" | sudo tee chroot-dir/etc/systemd/system/getty@tty1.service.d/override.conf
+          printf "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin liveuser --noclear %%I \\$TERM\n" | sudo tee chroot-dir/etc/systemd/system/getty@tty1.service.d/override.conf
 
-          sudo chroot chroot-dir /bin/bash -c "
-            apt-get update
-            apt-get install -y linux-image-generic initramfs-tools live-boot sudo systemd-sysv
-            echo 'ubuntu-live' > /etc/hostname
-            useradd -m -s /bin/bash liveuser
-            passwd -d liveuser
-            echo 'liveuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
-          "
-
-      - name: Prepare ISO directory
+      - name: Clean up chroot
         run: |
-          mkdir -p live-iso/iso/{boot/grub,casper}
+          sudo chroot chroot-dir apt clean
+          sudo umount -lf chroot-dir/dev || true
+          sudo umount -lf chroot-dir/proc || true
+          sudo umount -lf chroot-dir/sys || true
 
-      - name: Create initrd and vmlinuz
-        run: |
-          sudo chroot chroot-dir /bin/bash -c "update-initramfs -c -k all"
-          sudo cp chroot-dir/boot/vmlinuz-* live-iso/iso/casper/vmlinuz
-          sudo cp chroot-dir/boot/initrd.img-* live-iso/iso/casper/initrd
-
-      - name: Create grub.cfg
-        run: |
-          cat > live-iso/iso/boot/grub/grub.cfg <<EOF
-set default=0
-set timeout=5
-
-menuentry "Ubuntu Noble CLI (Live)" {
-    linux /casper/vmlinuz boot=live quiet
-    initrd /casper/initrd
-}
-EOF
-
-      - name: Compress filesystem.squashfs
+      - name: Create squashfs
         run: |
           sudo mksquashfs chroot-dir live-iso/iso/casper/filesystem.squashfs -e boot
 
-      - name: Create the ISO
+      - name: Copy kernel and initrd
         run: |
-          grub-mkrescue -o ubuntu-noble-cli-live.iso live-iso/iso --compress=xz
+          sudo cp chroot-dir/boot/vmlinuz-* live-iso/iso/casper/vmlinuz
+          sudo cp chroot-dir/boot/initrd.img-* live-iso/iso/casper/initrd
+
+      - name: Prepare ISO folder structure
+        run: |
+          mkdir -p live-iso/iso/{boot/grub,casper}
+          printf "set default=0\nset timeout=5\nmenuentry \"Ubuntu Noble CLI Live\" {\n  linux /casper/vmlinuz boot=live quiet autologin username=liveuser\n  initrd /casper/initrd\n}\n" > live-iso/iso/boot/grub/grub.cfg
+
+      - name: Create GRUB EFI image
+        run: |
+          mkdir -p efi-img/EFI/BOOT
+          grub-mkimage -o efi-img/EFI/BOOT/BOOTX64.EFI -p /boot/grub -O x86_64-efi iso9660 normal linux configfile loopback
+          printf "set default=0\nset timeout=5\nmenuentry \"Ubuntu Noble CLI Live\" {\n  linux /casper/vmlinuz boot=live quiet autologin username=liveuser\n  initrd /casper/initrd\n}\n" > efi-img/boot/grub/grub.cfg
+          (cd efi-img && grub-mkrescue -o ../live-iso/iso/boot/grub/efi.img .)
+
+      - name: Build ISO
+        run: |
+          grub-mkrescue -o ubuntu-noble-cli-live.iso live-iso/iso
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
