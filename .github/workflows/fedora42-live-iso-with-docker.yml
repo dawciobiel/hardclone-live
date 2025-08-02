@@ -1,4 +1,4 @@
-name: Fedora Live ISO with Docker v21
+name: Build Custom Fedora Live ISO with Docker
 
 on:
   # push:
@@ -268,12 +268,13 @@ jobs:
         mkdir -p /var/cache/live
         mkdir -p /tmp/fedora-build
         
-        # Use temporary directory for livemedia-creator (it requires empty dir)
-        rm -rf /tmp/iso-build
-        mkdir -p /tmp/iso-build
-        
         # Ensure output directory exists
         mkdir -p /build/output
+        
+        echo "Preparing clean build directory..."
+        # Use unique directory name to avoid conflicts
+        BUILD_DIR="/tmp/iso-build-$-$(date +%s)"
+        echo "Using build directory: $BUILD_DIR"
         
         # Set SELinux to permissive for build (if needed)
         setenforce 0 2>/dev/null || true
@@ -284,19 +285,19 @@ jobs:
         livemedia-creator \
             --ks /build/fedora-custom-live.ks \
             --no-virt \
-            --resultdir /tmp/iso-build \
+            --resultdir "$BUILD_DIR" \
             --project="Fedora Live Custom" \
             --make-iso \
             --volid="FedoraLiveCustom" \
             --iso-only \
             --iso-name fedora-live-custom.iso \
-            --logfile /tmp/iso-build/livemedia.log
+            --logfile "$BUILD_DIR/livemedia.log"
         
         # Copy results to mounted output directory
-        if [ -f "/tmp/iso-build/fedora-live-custom.iso" ]; then
+        if [ -f "$BUILD_DIR/fedora-live-custom.iso" ]; then
             echo "ISO created successfully! Copying to output directory..."
-            cp /tmp/iso-build/fedora-live-custom.iso /build/output/
-            cp /tmp/iso-build/livemedia.log /build/output/build.log
+            cp "$BUILD_DIR/fedora-live-custom.iso" /build/output/
+            cp "$BUILD_DIR/livemedia.log" /build/output/build.log 2>/dev/null || true
         fi
         
         if [ -f "/build/output/fedora-live-custom.iso" ]; then
@@ -319,7 +320,9 @@ jobs:
             echo "ERROR: ISO build failed!"
             echo "Build log:"
             tail -50 /build/output/build.log 2>/dev/null || true
-            tail -50 /tmp/iso-build/livemedia.log 2>/dev/null || true
+            tail -50 "$BUILD_DIR/livemedia.log" 2>/dev/null || true
+            # Copy logs even if build failed
+            cp "$BUILD_DIR/livemedia.log" /build/output/build.log 2>/dev/null || true
             exit 1
         fi
         EOF
