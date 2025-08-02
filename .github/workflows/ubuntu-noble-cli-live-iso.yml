@@ -13,37 +13,38 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install required packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y debootstrap xorriso squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools
+          sudo apt-get install -y debootstrap squashfs-tools xorriso grub-pc-bin grub-efi-amd64-bin mtools dosfstools
 
-      - name: Bootstrap Ubuntu Noble
+      - name: Bootstrap Ubuntu Noble (CLI)
         run: |
-          sudo debootstrap --variant=minbase noble chroot-dir http://archive.ubuntu.com/ubuntu/
+          sudo debootstrap --variant=minbase noble chroot-dir http://archive.ubuntu.com/ubuntu
 
-      - name: Configure chroot environment
+      - name: Install minimal packages
         run: |
-          sudo cp /etc/resolv.conf chroot-dir/etc/
-          sudo mount --bind /dev chroot-dir/dev
-          sudo mount --bind /dev/pts chroot-dir/dev/pts
-          sudo mount -t proc /proc chroot-dir/proc
-          sudo mount -t sysfs /sys chroot-dir/sys
-          sudo chroot chroot-dir /bin/bash -c "
-            apt-get update &&
-            apt-get install -y linux-image-generic casper sudo &&
-            useradd -m -s /bin/bash liveuser &&
-            echo 'liveuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
-          "
-          sudo umount -lf chroot-dir/dev/pts
-          sudo umount -lf chroot-dir/dev
-          sudo umount -lf chroot-dir/proc
-          sudo umount -lf chroot-dir/sys
+          sudo chroot chroot-dir apt-get update
+          sudo chroot chroot-dir apt-get install -y linux-image-generic grub-pc-bin grub-efi-amd64-bin systemd-sysv live-boot sudo
 
-      - name: Create ISO directory structure
+      - name: Configure user
         run: |
-          mkdir -p live-iso/iso/casper
-          mkdir -p live-iso/iso/boot/grub
+          echo "liveuser:x:1000:1000:Live User:/home/liveuser:/bin/bash" | sudo chroot chroot-dir tee -a /etc/passwd
+          echo "liveuser:x:1000:" | sudo chroot chroot-dir tee -a /etc/group
+          sudo chroot chroot-dir mkdir -p /home/liveuser
+          sudo chroot chroot-dir chown 1000:1000 /home/liveuser
+          echo "liveuser ALL=(ALL) NOPASSWD: ALL" | sudo chroot chroot-dir tee /etc/sudoers.d/liveuser
+          sudo chroot chroot-dir chmod 0440 /etc/sudoers.d/liveuser
+
+      - name: Clean up apt
+        run: |
+          sudo chroot chroot-dir apt-get clean
+          sudo rm -rf chroot-dir/var/lib/apt/lists/*
+
+      - name: Prepare ISO directory structure
+        run: |
+          mkdir -p live-iso/iso/{casper,boot/grub}
+          echo "Ubuntu Noble CLI Live" > live-iso/iso/README.diskdefines
 
       - name: Create squashfs
         run: |
@@ -57,6 +58,9 @@ jobs:
           sudo cp chroot-dir/boot/$KERNEL live-iso/iso/casper/vmlinuz
           sudo cp chroot-dir/boot/$INITRD live-iso/iso/casper/initrd
 
+          sudo chmod 644 live-iso/iso/casper/vmlinuz live-iso/iso/casper/initrd
+          sudo chown $(id -u):$(id -g) live-iso/iso/casper/vmlinuz live-iso/iso/casper/initrd
+
       - name: Create grub.cfg
         run: |
           cat <<EOF > live-iso/iso/boot/grub/grub.cfg
@@ -64,7 +68,7 @@ jobs:
           set timeout=5
 
           menuentry "Ubuntu Noble CLI Live" {
-              linux /casper/vmlinuz boot=casper quiet ---
+              linux /casper/vmlinuz boot=live quiet splash ---
               initrd /casper/initrd
           }
           EOF
@@ -73,7 +77,7 @@ jobs:
         run: |
           grub-mkrescue -o ubuntu-noble-cli-live-iso.iso live-iso/iso --compress=xz
 
-      - name: Upload ISO artifact
+      - name: Upload ISO
         uses: actions/upload-artifact@v4
         with:
           name: ubuntu-noble-cli-live-iso
