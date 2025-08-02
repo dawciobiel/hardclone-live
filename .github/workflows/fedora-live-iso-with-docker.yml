@@ -1,4 +1,4 @@
-name: Build Custom Fedora Live ISO with Docker
+name: Fedora Live ISO with Docker
 
 on:
   push:
@@ -18,50 +18,9 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    - name: Create Dockerfile for Fedora ISO build
+    - name: Create Fedora kickstart file
       run: |
-        cat > Dockerfile << 'EOF'
-        FROM registry.fedoraproject.org/fedora:39
-
-        # Install build dependencies
-        RUN dnf update -y && \
-            dnf install -y \
-                livecd-tools \
-                spin-kickstarts \
-                lorax \
-                anaconda-tui \
-                pykickstart \
-                squashfs-tools \
-                xorriso \
-                syslinux \
-                genisoimage \
-                isomd5sum \
-                createrepo_c \
-                dnf-plugins-core \
-                wget \
-                curl \
-                rsync \
-                parted \
-                util-linux \
-                git \
-                findutils && \
-            dnf clean all
-
-        # Create working directory
-        WORKDIR /build
-
-        # Copy repository content
-        COPY . /build/
-
-        # Create build script
-        RUN cat > /build/build-iso.sh << 'BUILDEOF'
-        #!/bin/bash
-        set -e
-
-        echo "=== Starting Fedora Live ISO Build ==="
-
-        # Create kickstart file
-        cat > /build/fedora-custom-live.ks << 'KSEOF'
+        cat > fedora-custom-live.ks << 'EOF'
         # Custom Fedora Live System Kickstart
         
         # Basic configuration
@@ -295,7 +254,15 @@ jobs:
         
         echo "=== Post-install completed ==="
         %end
-        KSEOF
+        EOF
+
+    - name: Create build script
+      run: |
+        cat > build-iso.sh << 'EOF'
+        #!/bin/bash
+        set -e
+
+        echo "=== Starting Fedora Live ISO Build ==="
 
         # Prepare build environment
         mkdir -p /var/cache/live
@@ -336,30 +303,94 @@ jobs:
         else
             echo "ERROR: ISO build failed!"
             echo "Build log:"
-            tail -50 /build/build.log || true
+            tail -50 /build/build.log 2>/dev/null || true
             exit 1
         fi
-        BUILDEOF
+        EOF
         
+        chmod +x build-iso.sh
+
+    - name: Create Dockerfile
+      run: |
+        cat > Dockerfile << 'EOF'
+        FROM registry.fedoraproject.org/fedora:39
+
+        # Install build dependencies
+        RUN dnf update -y && \
+            dnf install -y \
+                livecd-tools \
+                spin-kickstarts \
+                lorax \
+                anaconda-tui \
+                pykickstart \
+                squashfs-tools \
+                xorriso \
+                syslinux \
+                genisoimage \
+                isomd5sum \
+                createrepo_c \
+                dnf-plugins-core \
+                wget \
+                curl \
+                rsync \
+                parted \
+                util-linux \
+                git \
+                findutils && \
+            dnf clean all
+
+        # Create working directory
+        WORKDIR /build
+
+        # Copy files
+        COPY fedora-custom-live.ks /build/
+        COPY build-iso.sh /build/
+        COPY appimages/ /build/appimages/
+        COPY packages/ /build/packages/
+
         # Make build script executable
-        chmod +x /build/build-iso.sh
-        
+        RUN chmod +x /build/build-iso.sh
+
         # Set entry point
         CMD ["/build/build-iso.sh"]
         EOF
 
+    - name: Create directories for custom content
+      run: |
+        mkdir -p appimages
+        mkdir -p packages
+        
+        # Copy any existing AppImages and packages from repo
+        if [ -d "appimages" ] && [ "$(ls -A appimages 2>/dev/null)" ]; then
+            echo "Found existing AppImages"
+        else
+            echo "No AppImages found - creating empty directory"
+        fi
+        
+        if [ -d "packages" ] && [ "$(ls -A packages 2>/dev/null)" ]; then
+            echo "Found existing packages"
+        else
+            echo "No packages found - creating empty directory"
+        fi
+
     - name: Build Fedora Live ISO in Docker
       run: |
         echo "Building Docker image and creating Fedora Live ISO..."
+        ls -la
         
         # Build and run the Docker container
         docker build -t fedora-live-builder .
+        
+        # Create output directory
+        mkdir -p output
+        
+        # Run the container with proper volume mounting
         docker run --privileged --rm \
-          -v $(pwd)/output:/build/output \
+          -v "$(pwd)/output:/build/output" \
           fedora-live-builder
         
         echo "Docker build completed, checking output..."
-        ls -la output/ || mkdir -p output
+        ls -la output/
 
     - name: Verify ISO creation
       run: |
@@ -369,6 +400,13 @@ jobs:
           file output/fedora-live-custom.iso
         else
           echo "❌ ISO creation failed!"
+          echo "Contents of output directory:"
+          ls -la output/
+          echo "Checking for build logs..."
+          if [ -f "output/build.log" ]; then
+            echo "=== BUILD LOG ==="
+            tail -50 output/build.log
+          fi
           exit 1
         fi
 
