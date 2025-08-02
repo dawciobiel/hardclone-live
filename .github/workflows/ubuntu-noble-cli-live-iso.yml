@@ -4,25 +4,37 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-iso:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install required packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y debootstrap grub-pc-bin grub-efi xorriso mtools
+          sudo apt-get install -y debootstrap xorriso isolinux squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools
 
-      - name: Bootstrap minimal Ubuntu system
+      - name: Bootstrap minimal Ubuntu Noble system
         run: |
           sudo debootstrap --arch=amd64 noble chroot-dir http://archive.ubuntu.com/ubuntu/
 
       - name: Configure system inside chroot
         run: |
           sudo cp /etc/resolv.conf chroot-dir/etc/
+
+          # Create override.conf for autologin
+          mkdir -p override-tmp
+          cat > override-tmp/override.conf <<EOF
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin liveuser --noclear %I \$TERM
+EOF
+
+          sudo mkdir -p chroot-dir/etc/systemd/system/getty@tty1.service.d
+          sudo cp override-tmp/override.conf chroot-dir/etc/systemd/system/getty@tty1.service.d/override.conf
+
           sudo chroot chroot-dir /bin/bash -c "
             apt-get update
             apt-get install -y linux-image-generic initramfs-tools live-boot sudo systemd-sysv
@@ -30,38 +42,42 @@ jobs:
             useradd -m -s /bin/bash liveuser
             passwd -d liveuser
             echo 'liveuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
-            mkdir -p /etc/systemd/system/getty@tty1.service.d
-            tee /etc/systemd/system/getty@tty1.service.d/override.conf > /dev/null <<EOL
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin liveuser --noclear %I \$TERM
-EOL
           "
 
-      - name: Prepare ISO directory structure
+      - name: Create initrd and vmlinuz
+        run: |
+          sudo chroot chroot-dir /bin/bash -c "
+            update-initramfs -c -k all
+          "
+          sudo cp chroot-dir/boot/vmlinuz-* live-iso/iso/casper/vmlinuz
+          sudo cp chroot-dir/boot/initrd.img-* live-iso/iso/casper/initrd
+
+      - name: Prepare ISO directory
         run: |
           mkdir -p live-iso/iso/{boot/grub,casper}
-          sudo cp chroot-dir/boot/vmlinuz* live-iso/iso/casper/vmlinuz
-          sudo cp chroot-dir/boot/initrd.img* live-iso/iso/casper/initrd
+          echo "Ubuntu Noble CLI Live ISO" | sudo tee live-iso/iso/README.diskdefines
 
-      - name: Create grub.cfg
-        run: |
-          cat <<EOF > live-iso/iso/boot/grub/grub.cfg
+          # Create grub.cfg
+          cat > live-iso/iso/boot/grub/grub.cfg <<EOF
 set default=0
 set timeout=5
 
-menuentry "Ubuntu Noble CLI Live" {
+menuentry "Ubuntu Noble CLI (Live)" {
     linux /casper/vmlinuz boot=live quiet
     initrd /casper/initrd
 }
 EOF
 
-      - name: Build ISO
+      - name: Compress filesystem.squashfs
+        run: |
+          sudo mksquashfs chroot-dir live-iso/iso/casper/filesystem.squashfs -e boot
+
+      - name: Create the ISO
         run: |
           grub-mkrescue -o ubuntu-noble-cli-live.iso live-iso/iso --compress=xz
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ubuntu-noble-cli-live
+          name: ubuntu-noble-cli-live.iso
           path: ubuntu-noble-cli-live.iso
