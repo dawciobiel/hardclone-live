@@ -1,0 +1,449 @@
+name: Build Custom Fedora Live ISO with Docker
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-fedora-live:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Create Dockerfile for Fedora ISO build
+      run: |
+        cat > Dockerfile << 'EOF'
+        FROM registry.fedoraproject.org/fedora:39
+
+        # Install build dependencies
+        RUN dnf update -y && \
+            dnf install -y \
+                livecd-tools \
+                spin-kickstarts \
+                lorax \
+                anaconda-tui \
+                pykickstart \
+                squashfs-tools \
+                xorriso \
+                syslinux \
+                genisoimage \
+                isomd5sum \
+                createrepo_c \
+                dnf-plugins-core \
+                wget \
+                curl \
+                rsync \
+                parted \
+                util-linux \
+                git \
+                findutils && \
+            dnf clean all
+
+        # Create working directory
+        WORKDIR /build
+
+        # Copy repository content
+        COPY . /build/
+
+        # Create build script
+        RUN cat > /build/build-iso.sh << 'BUILDEOF'
+        #!/bin/bash
+        set -e
+
+        echo "=== Starting Fedora Live ISO Build ==="
+
+        # Create kickstart file
+        cat > /build/fedora-custom-live.ks << 'KSEOF'
+        # Custom Fedora Live System Kickstart
+        
+        # Basic configuration
+        lang en_US.UTF-8
+        keyboard us
+        timezone US/Eastern
+        
+        # Authentication
+        auth --enableshadow --passalgo=sha512
+        selinux --enforcing
+        firewall --enabled --service=mdns
+        
+        # Network
+        network --bootproto=dhcp --device=link --activate
+        
+        # Root account - locked for security
+        rootpw --lock --iscrypted locked
+        
+        # Official Fedora repositories
+        repo --name=fedora --baseurl=https://download.fedoraproject.org/pub/fedora/linux/releases/39/Everything/x86_64/os/
+        repo --name=updates --baseurl=https://download.fedoraproject.org/pub/fedora/linux/updates/39/Everything/x86_64/
+        
+        # Bootloader for UEFI and BIOS
+        bootloader --location=mbr --append="rhgb quiet"
+        
+        # Disk configuration
+        zerombr
+        clearpart --all --initlabel
+        
+        %packages
+        # Core Fedora system
+        @core
+        @standard
+        @hardware-support
+        
+        # Kernel and boot essentials
+        kernel
+        kernel-modules
+        kernel-modules-extra
+        dracut-live
+        
+        # Boot support for both UEFI and BIOS
+        grub2-pc
+        grub2-pc-modules  
+        grub2-efi-x64
+        grub2-efi-x64-modules
+        efibootmgr
+        shim-x64
+        syslinux
+        
+        # System essentials
+        systemd
+        NetworkManager
+        NetworkManager-wifi
+        
+        # CLI tools
+        bash-completion
+        vim
+        nano
+        wget
+        curl
+        git
+        htop
+        tree
+        unzip
+        tar
+        rsync
+        
+        # Hardware support
+        linux-firmware
+        
+        # AppImage support
+        fuse
+        fuse-libs
+        
+        # Development tools (optional)
+        gcc
+        make
+        dnf-plugins-core
+        
+        # Fedora branding
+        fedora-release
+        fedora-repos
+        fedora-gpg-keys
+        
+        # Exclude desktop environments (CLI only)
+        -@gnome-desktop-environment
+        -@kde-desktop-environment
+        -@xfce-desktop-environment
+        -@mate-desktop-environment
+        -@cinnamon-desktop-environment
+        
+        # Exclude heavy applications
+        -libreoffice*
+        -firefox
+        -thunderbird
+        -evolution*
+        -gnome-*
+        -kde-*
+        
+        %end
+        
+        # Enable essential services
+        services --enabled=NetworkManager,chronyd,systemd-resolved
+        
+        # Post-installation (outside chroot)
+        %post --nochroot
+        echo "=== Post-install (nochroot) phase ==="
+        
+        # Copy custom AppImages
+        if [ -d /build/appimages ]; then
+            echo "Copying AppImages..."
+            mkdir -p $INSTALL_ROOT/opt/appimages
+            cp /build/appimages/*.AppImage $INSTALL_ROOT/opt/appimages/ 2>/dev/null || true
+            chmod +x $INSTALL_ROOT/opt/appimages/*.AppImage 2>/dev/null || true
+        fi
+        
+        # Copy custom RPM packages
+        if [ -d /build/packages ]; then
+            echo "Copying RPM packages..."
+            mkdir -p $INSTALL_ROOT/opt/packages
+            cp /build/packages/*.rpm $INSTALL_ROOT/opt/packages/ 2>/dev/null || true
+        fi
+        
+        %end
+        
+        # Post-installation (inside chroot)
+        %post
+        echo "=== Post-install (chroot) phase ==="
+        
+        # Create fedorauser with sudo privileges
+        useradd -m -G wheel -s /bin/bash fedorauser
+        echo "fedorauser:fedora" | chpasswd
+        
+        # Configure passwordless sudo
+        echo "fedorauser ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/fedorauser
+        chmod 440 /etc/sudoers.d/fedorauser
+        
+        # Configure auto-login for CLI
+        mkdir -p /etc/systemd/system/getty@tty1.service.d
+        cat > /etc/systemd/system/getty@tty1.service.d/override.conf << 'AUTOEOF'
+        [Service]
+        ExecStart=
+        ExecStart=-/usr/sbin/agetty --autologin fedorauser --noclear %I $TERM
+        AUTOEOF
+        
+        # Install custom RPM packages
+        if [ -d /opt/packages ]; then
+            echo "Installing custom RPM packages..."
+            dnf install -y /opt/packages/*.rpm 2>/dev/null || true
+        fi
+        
+        # Setup AppImages
+        mkdir -p /home/fedorauser/Applications
+        if [ -d /opt/appimages ]; then
+            echo "Setting up AppImages..."
+            cp /opt/appimages/*.AppImage /home/fedorauser/Applications/ 2>/dev/null || true
+            chmod +x /home/fedorauser/Applications/*.AppImage 2>/dev/null || true
+        fi
+        chown -R fedorauser:fedorauser /home/fedorauser/Applications
+        
+        # Configure user environment
+        cat >> /home/fedorauser/.bashrc << 'BASHEOF'
+        # Custom Fedora Live configuration
+        export PATH="$PATH:$HOME/Applications"
+        alias ll='ls -la'
+        alias la='ls -la'
+        alias ..='cd ..'
+        alias grep='grep --color=auto'
+        
+        # Welcome message
+        echo "Witaj w Custom Fedora Live System!"
+        echo "Użytkownik: fedorauser | Hasło: fedora"
+        echo "AppImages: ~/Applications/"
+        BASHEOF
+        
+        # Set hostname
+        echo "fedora-live-custom" > /etc/hostname
+        
+        # System message
+        cat > /etc/motd << 'MOTDEOF'
+        ==========================================
+              Custom Fedora Live System
+        ==========================================
+        
+        🐧 Użytkownik: fedorauser (hasło: fedora)
+        ⚡ Sudo: dostępne bez hasła
+        📁 AppImages: ~/Applications/
+        📦 Menedżer pakietów: dnf
+        
+        Przykładowe komendy:
+          dnf search nazwa_pakietu
+          dnf install nazwa_pakietu
+          ./Applications/aplikacja.AppImage
+        
+        ==========================================
+        MOTDEOF
+        
+        # Optimize DNF configuration
+        cat >> /etc/dnf/dnf.conf << 'DNFEOF'
+        fastestmirror=True
+        max_parallel_downloads=10
+        deltarpm=True
+        DNFEOF
+        
+        # Create persistence helper
+        cat > /home/fedorauser/setup-persistence.sh << 'PERSISTEOF'
+        #!/bin/bash
+        echo "=========================================="
+        echo "    Fedora Live Persistence Setup"
+        echo "=========================================="
+        echo
+        echo "Aby skonfigurować persistence:"
+        echo "1. Zidentyfikuj urządzenie USB: lsblk"
+        echo "2. Utwórz partycję dla danych persistence"
+        echo "3. Sformatuj jako ext4: mkfs.ext4 -L Fedora-Live-rw /dev/sdXN"
+        echo "4. Restart - persistence będzie automatycznie wykryte"
+        echo
+        echo "UWAGA: Bądź ostrożny z nazwami urządzeń!"
+        echo
+        lsblk
+        PERSISTEOF
+        
+        chmod +x /home/fedorauser/setup-persistence.sh
+        chown fedorauser:fedorauser /home/fedorauser/setup-persistence.sh
+        
+        # Clean up to reduce image size
+        dnf clean all
+        rm -rf /var/cache/dnf/*
+        rm -rf /tmp/*
+        
+        echo "=== Post-install completed ==="
+        %end
+        KSEOF
+
+        # Prepare build environment
+        mkdir -p /var/cache/live
+        mkdir -p /tmp/fedora-build
+        mkdir -p /build/output
+        
+        # Set SELinux to permissive for build (if needed)
+        setenforce 0 2>/dev/null || true
+        
+        echo "Building Fedora Live ISO..."
+        
+        # Build the ISO
+        livecd-creator \
+            --verbose \
+            --config=/build/fedora-custom-live.ks \
+            --fslabel="FedoraLiveCustom" \
+            --cache=/var/cache/live \
+            --tmpdir=/tmp/fedora-build \
+            --logfile=/build/build.log \
+            /build/output/fedora-live-custom.iso
+        
+        if [ -f "/build/output/fedora-live-custom.iso" ]; then
+            echo "ISO created successfully!"
+            
+            # Make hybrid bootable (UEFI + BIOS)
+            cd /build/output
+            /usr/bin/isohybrid --uefi fedora-live-custom.iso 2>/dev/null || echo "Warning: isohybrid failed, ISO might still be bootable"
+            
+            # Generate checksums
+            sha256sum fedora-live-custom.iso > fedora-live-custom.iso.sha256
+            sha512sum fedora-live-custom.iso > fedora-live-custom.iso.sha512
+            
+            # Show results
+            echo "=== BUILD COMPLETE ==="
+            ls -lh fedora-live-custom.iso*
+            echo "======================="
+            
+        else
+            echo "ERROR: ISO build failed!"
+            echo "Build log:"
+            tail -50 /build/build.log || true
+            exit 1
+        fi
+        BUILDEOF
+        
+        # Make build script executable
+        chmod +x /build/build-iso.sh
+        
+        # Set entry point
+        CMD ["/build/build-iso.sh"]
+        EOF
+
+    - name: Build Fedora Live ISO in Docker
+      run: |
+        echo "Building Docker image and creating Fedora Live ISO..."
+        
+        # Build and run the Docker container
+        docker build -t fedora-live-builder .
+        docker run --privileged --rm \
+          -v $(pwd)/output:/build/output \
+          fedora-live-builder
+        
+        echo "Docker build completed, checking output..."
+        ls -la output/ || mkdir -p output
+
+    - name: Verify ISO creation
+      run: |
+        if [ -f "output/fedora-live-custom.iso" ]; then
+          echo "✅ ISO created successfully!"
+          ls -lh output/fedora-live-custom.iso*
+          file output/fedora-live-custom.iso
+        else
+          echo "❌ ISO creation failed!"
+          exit 1
+        fi
+
+    - name: Upload Fedora Live ISO
+      uses: actions/upload-artifact@v4
+      if: success()
+      with:
+        name: fedora-live-custom-iso
+        path: |
+          output/fedora-live-custom.iso
+          output/fedora-live-custom.iso.sha256
+          output/fedora-live-custom.iso.sha512
+        retention-days: 30
+
+    - name: Upload build logs
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: build-logs
+        path: |
+          output/build.log
+        retention-days: 7
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      with:
+        tag_name: fedora-docker-v${{ github.run_number }}
+        name: Fedora Live Custom (Docker Build) v${{ github.run_number }}
+        files: |
+          output/fedora-live-custom.iso
+          output/fedora-live-custom.iso.sha256
+          output/fedora-live-custom.iso.sha512
+        body: |
+          ## 🐧 Custom Fedora Live ISO - Docker Build #${{ github.run_number }}
+          
+          **Zbudowano używając czystego Dockera z kontenerem Fedory!**
+          
+          ### 📋 Specyfikacje:
+          - **System**: Fedora 39 (najnowsza)
+          - **Interface**: CLI (linia komend)
+          - **Użytkownik**: `fedorauser` (hasło: `fedora`)
+          - **Sudo**: Bez hasła
+          - **Boot**: UEFI + BIOS (hybrid)
+          - **AppImages**: Pełne wsparcie
+          - **Persistence**: Skrypt pomocniczy dołączony
+          
+          ### 🚀 Instrukcja użycia:
+          1. **Pobierz**: `fedora-live-custom.iso`
+          2. **Nagraj na USB**: 
+             ```bash
+             sudo dd if=fedora-live-custom.iso of=/dev/sdX bs=4M status=progress
+             ```
+             Lub użyj Rufus/Ventoy/Balena Etcher
+          3. **Bootuj z USB** (UEFI lub BIOS)
+          4. **Auto-login** jako `fedorauser`
+          
+          ### 📁 Dodawanie własnych aplikacji:
+          - **AppImages**: Umieść w `appimages/` i zrób commit
+          - **Pakiety RPM**: Umieść w `packages/` i zrób commit
+          - **Rebuild**: Push do main branch
+          
+          ### 🛠️ Komendy systemowe:
+          ```bash
+          dnf search nazwa           # Szukaj pakiety
+          dnf install nazwa          # Instaluj pakiety  
+          ./Applications/app.AppImage # Uruchom AppImage
+          ~/setup-persistence.sh     # Konfiguruj persistence
+          ```
+          
+          ### ✅ Weryfikacja:
+          - **SHA256**: `sha256sum -c fedora-live-custom.iso.sha256`
+          - **SHA512**: `sha512sum -c fedora-live-custom.iso.sha512`
+          
+          ---
+          *Zbudowano w 100% z użyciem natywnego kontenera Fedory w Dockerze*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
