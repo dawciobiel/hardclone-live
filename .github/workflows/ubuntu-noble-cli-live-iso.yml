@@ -2,83 +2,74 @@ name: Build Ubuntu Noble CLI Live ISO
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install required packages
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y debootstrap squashfs-tools xorriso grub-pc-bin grub-efi-amd64-bin mtools dosfstools
+          sudo apt-get install -y grub-pc-bin grub-efi-amd64-bin xorriso squashfs-tools dosfstools mtools debootstrap
 
-      - name: Bootstrap Ubuntu Noble (CLI)
+      - name: Bootstrap base system
         run: |
-          sudo debootstrap --variant=minbase noble chroot-dir http://archive.ubuntu.com/ubuntu
+          sudo debootstrap --arch=amd64 noble chroot-dir http://archive.ubuntu.com/ubuntu/
 
-      - name: Install minimal packages
+      - name: Configure base system
+        run: |
+          sudo cp /etc/resolv.conf chroot-dir/etc/
+          echo "ubuntu-live" | sudo tee chroot-dir/etc/hostname
+          echo "root:live" | sudo chroot chroot-dir chpasswd
+          echo "live ALL=(ALL) NOPASSWD: ALL" | sudo tee -a chroot-dir/etc/sudoers.d/live
+          sudo chmod 0440 chroot-dir/etc/sudoers.d/live
+
+      - name: Install packages in chroot
         run: |
           sudo chroot chroot-dir apt-get update
-          sudo chroot chroot-dir apt-get install -y linux-image-generic grub-pc-bin grub-efi-amd64-bin systemd-sysv live-boot sudo
-
-      - name: Configure user
-        run: |
-          echo "liveuser:x:1000:1000:Live User:/home/liveuser:/bin/bash" | sudo chroot chroot-dir tee -a /etc/passwd
-          echo "liveuser:x:1000:" | sudo chroot chroot-dir tee -a /etc/group
-          sudo chroot chroot-dir mkdir -p /home/liveuser
-          sudo chroot chroot-dir chown 1000:1000 /home/liveuser
-          echo "liveuser ALL=(ALL) NOPASSWD: ALL" | sudo chroot chroot-dir tee /etc/sudoers.d/liveuser
-          sudo chroot chroot-dir chmod 0440 /etc/sudoers.d/liveuser
-
-      - name: Clean up apt
-        run: |
+          sudo chroot chroot-dir apt-get install -y linux-image-generic casper sudo systemd-sysv
           sudo chroot chroot-dir apt-get clean
-          sudo rm -rf chroot-dir/var/lib/apt/lists/*
 
-      - name: Prepare ISO directory structure
+      - name: Setup ISO structure
         run: |
-          mkdir -p live-iso/iso/{casper,boot/grub}
-          echo "Ubuntu Noble CLI Live" > live-iso/iso/README.diskdefines
-
-      - name: Create squashfs
-        run: |
+          mkdir -p live-iso/iso/{boot/grub,casper}
+          sudo cp chroot-dir/boot/vmlinuz* live-iso/iso/casper/vmlinuz
+          sudo cp chroot-dir/boot/initrd.img* live-iso/iso/casper/initrd
           sudo mksquashfs chroot-dir live-iso/iso/casper/filesystem.squashfs -e boot
 
-      - name: Copy kernel and initrd
-        run: |
-          KERNEL=$(ls chroot-dir/boot/vmlinuz-* | head -n1 | xargs -n1 basename)
-          INITRD=$(ls chroot-dir/boot/initrd.img-* | head -n1 | xargs -n1 basename)
-
-          sudo cp chroot-dir/boot/$KERNEL live-iso/iso/casper/vmlinuz
-          sudo cp chroot-dir/boot/$INITRD live-iso/iso/casper/initrd
-
-          sudo chmod 644 live-iso/iso/casper/vmlinuz live-iso/iso/casper/initrd
-          sudo chown $(id -u):$(id -g) live-iso/iso/casper/vmlinuz live-iso/iso/casper/initrd
-
-      - name: Create grub.cfg
+      - name: Create grub config
         run: |
           cat <<EOF > live-iso/iso/boot/grub/grub.cfg
           set default=0
           set timeout=5
 
           menuentry "Ubuntu Noble CLI Live" {
-              linux /casper/vmlinuz boot=live quiet splash ---
+              linux /casper/vmlinuz boot=casper quiet ---
               initrd /casper/initrd
           }
           EOF
+
+      - name: Fix permissions for ISO contents
+        run: |
+          sudo chown -R $USER:$USER live-iso
+          sudo chmod -R a+rX live-iso
+
+      - name: Debug ISO contents
+        run: |
+          ls -lR live-iso
 
       - name: Build ISO
         run: |
           grub-mkrescue -o ubuntu-noble-cli-live-iso.iso live-iso/iso --compress=xz
 
-      - name: Upload ISO
+      - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ubuntu-noble-cli-live-iso
+          name: ubuntu-noble-cli-live
           path: ubuntu-noble-cli-live-iso.iso
