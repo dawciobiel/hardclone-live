@@ -20,7 +20,7 @@ jobs:
 
     - name: Create Fedora kickstart file
       run: |
-        cat > fedora-custom-live.ks << 'EOF'
+        cat > fedora-custom-live.ks << 'KSEOF'
         # Custom Fedora Live System Kickstart
         
         # Basic configuration
@@ -193,7 +193,7 @@ jobs:
         
         # Welcome message
         echo "Witaj w Custom Fedora Live System!"
-        echo "Użytkownik: fedorauser | Hasło: fedora"
+        echo "Uzytkownik: fedorauser | Haslo: fedora"
         echo "AppImages: ~/Applications/"
         BASHEOF
         
@@ -206,12 +206,12 @@ jobs:
               Custom Fedora Live System
         ==========================================
         
-        🐧 Użytkownik: fedorauser (hasło: fedora)
-        ⚡ Sudo: dostępne bez hasła
-        📁 AppImages: ~/Applications/
-        📦 Menedżer pakietów: dnf
+        Uzytkownik: fedorauser (haslo: fedora)
+        Sudo: dostepne bez hasla
+        AppImages: ~/Applications/
+        Menedzer pakietow: dnf
         
-        Przykładowe komendy:
+        Przykladowe komendy:
           dnf search nazwa_pakietu
           dnf install nazwa_pakietu
           ./Applications/aplikacja.AppImage
@@ -233,13 +233,13 @@ jobs:
         echo "    Fedora Live Persistence Setup"
         echo "=========================================="
         echo
-        echo "Aby skonfigurować persistence:"
-        echo "1. Zidentyfikuj urządzenie USB: lsblk"
-        echo "2. Utwórz partycję dla danych persistence"
+        echo "Aby skonfigurowac persistence:"
+        echo "1. Zidentyfikuj urzadzenie USB: lsblk"
+        echo "2. Utworz partycje dla danych persistence"
         echo "3. Sformatuj jako ext4: mkfs.ext4 -L Fedora-Live-rw /dev/sdXN"
-        echo "4. Restart - persistence będzie automatycznie wykryte"
+        echo "4. Restart - persistence bedzie automatycznie wykryte"
         echo
-        echo "UWAGA: Bądź ostrożny z nazwami urządzeń!"
+        echo "UWAGA: Badz ostrozny z nazwami urzadzen!"
         echo
         lsblk
         PERSISTEOF
@@ -254,7 +254,7 @@ jobs:
         
         echo "=== Post-install completed ==="
         %end
-        EOF
+        KSEOF
 
     - name: Create build script
       run: |
