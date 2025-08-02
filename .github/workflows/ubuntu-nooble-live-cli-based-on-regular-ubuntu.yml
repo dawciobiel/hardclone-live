@@ -65,7 +65,16 @@ jobs:
             apt-get update
             apt-get install -y ubuntu-standard
             apt-get install -y casper lupin-casper live-boot live-boot-initramfs-tools
-            apt-get install -y linux-image-generic linux-modules-extra-generic
+            
+            # Install kernel - be more explicit about this
+            echo 'Installing kernel...'
+            apt-get install -y linux-image-generic linux-modules-extra-generic linux-firmware
+            
+            # Verify kernel installation
+            echo 'Checking kernel installation...'
+            ls -la /boot/
+            ls -la /lib/modules/
+            
             apt-get install -y initramfs-tools busybox-initramfs
             apt-get install -y network-manager openssh-server
             apt-get install -y vim nano curl wget
@@ -86,6 +95,7 @@ jobs:
             printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin liveuser --noclear %%I \$TERM\n' > /etc/systemd/system/getty@tty1.service.d/override.conf
             
             # Configure live-boot
+            mkdir -p /etc/live
             echo 'export LIVE_USERNAME=liveuser' >> /etc/live/boot.conf
             echo 'export LIVE_HOSTNAME=ubuntu-live' >> /etc/live/boot.conf
             
@@ -100,7 +110,12 @@ jobs:
             echo 'loop' >> /etc/initramfs-tools/modules
             
             # Generate initramfs for all kernels
-            update-initramfs -u
+            echo 'Generating initramfs...'
+            update-initramfs -u || update-initramfs -c -k all
+            
+            # Verify initramfs generation
+            echo 'Checking initramfs generation...'
+            ls -la /boot/
             
             # Configure network
             systemctl enable NetworkManager
@@ -129,8 +144,15 @@ jobs:
           # Create empty preseed
           touch live-iso/preseed/ubuntu.seed
 
-      - name: Copy kernel and initrd
+      - name: Debug and copy kernel and initrd
         run: |
+          # Debug: Check what's in /boot
+          echo "=== Contents of chroot-dir/boot ==="
+          sudo ls -la chroot-dir/boot/ || echo "No /boot directory found"
+          
+          echo "=== Contents of chroot-dir/lib/modules ==="
+          sudo ls -la chroot-dir/lib/modules/ || echo "No /lib/modules directory found"
+          
           # Copy kernel and initrd from chroot (primary method)
           if sudo ls chroot-dir/boot/vmlinuz-* 1>/dev/null 2>&1; then
             sudo cp chroot-dir/boot/vmlinuz-* live-iso/casper/vmlinuz
@@ -140,7 +162,23 @@ jobs:
             echo "Used backup vmlinuz"
           else
             echo "ERROR: No kernel found!"
-            exit 1
+            echo "Trying to install kernel manually..."
+            
+            # Try to install kernel manually if missing
+            sudo chroot chroot-dir /bin/bash -c "
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y --reinstall linux-image-generic
+              ls -la /boot/
+            "
+            
+            if sudo ls chroot-dir/boot/vmlinuz-* 1>/dev/null 2>&1; then
+              sudo cp chroot-dir/boot/vmlinuz-* live-iso/casper/vmlinuz
+              echo "Kernel installed and copied successfully"
+            else
+              echo "FATAL: Still no kernel found after manual installation!"
+              exit 1
+            fi
           fi
           
           if sudo ls chroot-dir/boot/initrd.img-* 1>/dev/null 2>&1; then
@@ -150,8 +188,26 @@ jobs:
             cp ./initrd-backup live-iso/casper/initrd.lz
             echo "Used backup initrd"
           else
-            echo "ERROR: No initrd found!"
-            exit 1
+            echo "WARNING: No initrd found, trying to generate..."
+            
+            # Try to generate initrd manually
+            sudo chroot chroot-dir /bin/bash -c "
+              export DEBIAN_FRONTEND=noninteractive
+              KERNEL_VERSION=\$(ls /lib/modules/ | head -n1)
+              if [ -n \"\$KERNEL_VERSION\" ]; then
+                echo \"Generating initrd for kernel: \$KERNEL_VERSION\"
+                update-initramfs -c -k \$KERNEL_VERSION || mkinitramfs -o /boot/initrd.img-\$KERNEL_VERSION \$KERNEL_VERSION
+                ls -la /boot/
+              fi
+            "
+            
+            if sudo ls chroot-dir/boot/initrd.img-* 1>/dev/null 2>&1; then
+              sudo cp chroot-dir/boot/initrd.img-* live-iso/casper/initrd.lz
+              echo "Initrd generated and copied successfully"
+            else
+              echo "FATAL: No initrd found after generation attempt!"
+              exit 1
+            fi
           fi
 
       - name: Create filesystem manifest
