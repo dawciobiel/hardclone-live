@@ -31,10 +31,10 @@ jobs:
       run: |
         sudo cp /etc/resolv.conf chroot/etc/
         echo "ubuntu-cli-live" | sudo tee chroot/etc/hostname
-        cat <<EOF | sudo tee chroot/etc/hosts
-        127.0.0.1 localhost
-        127.0.1.1 ubuntu-cli-live
-        EOF
+        sudo tee chroot/etc/hosts > /dev/null <<EOF
+127.0.0.1 localhost
+127.0.1.1 ubuntu-cli-live
+EOF
 
     - name: Install basic packages and user
       run: |
