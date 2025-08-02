@@ -1,0 +1,261 @@
+name: Build Ubuntu Noble CLI Live ISO based on regular ubuntu base
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install required packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y debootstrap xorriso isolinux squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools wget
+
+      - name: Download Ubuntu Server ISO for kernel and initrd
+        run: |
+          # Download Ubuntu Server ISO to extract working kernel/initrd
+          wget -O ubuntu-server.iso http://archive.ubuntu.com/ubuntu/dists/noble/main/installer-amd64/current/legacy-images/netboot/mini.iso
+
+      - name: Extract kernel and initrd from server ISO
+        run: |
+          # Mount the server ISO to extract kernel/initrd
+          mkdir -p server-mount
+          sudo mount -o loop ubuntu-server.iso server-mount 2>/dev/null || true
+          
+          # Try to find kernel and initrd in the server ISO
+          if [ -f server-mount/linux ]; then
+            cp server-mount/linux ./vmlinuz-server
+          fi
+          if [ -f server-mount/initrd.gz ]; then
+            cp server-mount/initrd.gz ./initrd-server
+          fi
+          
+          sudo umount server-mount 2>/dev/null || true
+          rm -rf server-mount
+
+      - name: Bootstrap Ubuntu Noble system
+        run: |
+          # Use a more complete debootstrap
+          sudo debootstrap --arch=amd64 --include=systemd-sysv,dbus,sudo,adduser,passwd noble chroot-dir http://archive.ubuntu.com/ubuntu/
+
+      - name: Configure system inside chroot  
+        run: |
+          sudo cp /etc/resolv.conf chroot-dir/etc/
+          
+          # Mount necessary filesystems
+          sudo mount --bind /proc chroot-dir/proc
+          sudo mount --bind /sys chroot-dir/sys
+          sudo mount --bind /dev chroot-dir/dev
+          sudo mount --bind /dev/pts chroot-dir/dev/pts
+          
+          sudo chroot chroot-dir /bin/bash -c "
+            export DEBIAN_FRONTEND=noninteractive
+            export LC_ALL=C
+            
+            # Update and install packages
+            apt-get update
+            apt-get install -y ubuntu-standard
+            apt-get install -y casper lupin-casper live-boot live-boot-initramfs-tools
+            apt-get install -y linux-image-generic linux-modules-extra-generic
+            apt-get install -y initramfs-tools busybox-initramfs
+            apt-get install -y network-manager openssh-server
+            apt-get install -y vim nano curl wget
+            
+            # Configure system
+            echo 'ubuntu-live' > /etc/hostname
+            echo '127.0.0.1 localhost' > /etc/hosts
+            echo '127.0.1.1 ubuntu-live' >> /etc/hosts
+            
+            # Create live user
+            adduser --disabled-password --gecos '' liveuser
+            echo 'liveuser:' | chpasswd -e
+            usermod -aG sudo liveuser
+            echo 'liveuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+            
+            # Configure auto-login
+            mkdir -p /etc/systemd/system/getty@tty1.service.d
+            cat > /etc/systemd/system/getty@tty1.service.d/override.conf << EOF
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin liveuser --noclear %I \\\$TERM
+EOF
+            
+            # Configure live-boot
+            echo 'export LIVE_USERNAME=liveuser' >> /etc/live/boot.conf
+            echo 'export LIVE_HOSTNAME=ubuntu-live' >> /etc/live/boot.conf
+            
+            # Configure initramfs
+            echo 'BOOT=live' >> /etc/initramfs-tools/initramfs.conf
+            echo 'MODULES=most' >> /etc/initramfs-tools/initramfs.conf
+            echo 'COMPRESS=gzip' >> /etc/initramfs-tools/initramfs.conf
+            
+            # Add required modules for live boot
+            echo 'squashfs' >> /etc/initramfs-tools/modules  
+            echo 'overlay' >> /etc/initramfs-tools/modules
+            echo 'loop' >> /etc/initramfs-tools/modules
+            
+            # Generate initramfs for all kernels
+            update-initramfs -u
+            
+            # Configure network
+            systemctl enable NetworkManager
+            systemctl enable ssh
+            
+            # Clean up
+            apt-get autoremove -y
+            apt-get autoclean
+            rm -rf /var/lib/apt/lists/*
+            rm -rf /tmp/*
+            rm -rf /var/tmp/*
+          "
+
+      - name: Prepare ISO structure
+        run: |
+          mkdir -p live-iso/{isolinux,install,casper,preseed,.disk}
+          
+          # Create disk info
+          echo 'Ubuntu 24.04 LTS \"Noble Numbat\" - CLI Live' > live-iso/.disk/info
+          echo 'https://www.ubuntu.com/' > live-iso/.disk/release_notes_url
+          touch live-iso/.disk/base_installable
+          echo 'main restricted' > live-iso/.disk/base_components
+          echo 'not supported' > live-iso/.disk/cd_type
+          touch live-iso/ubuntu
+          
+          # Create empty preseed
+          touch live-iso/preseed/ubuntu.seed
+
+      - name: Copy kernel and initrd
+        run: |
+          # Copy kernel and initrd from chroot
+          sudo cp chroot-dir/boot/vmlinuz-* live-iso/casper/vmlinuz 2>/dev/null || {
+            echo "No vmlinuz found in chroot, trying server files"
+            if [ -f ./vmlinuz-server ]; then
+              cp ./vmlinuz-server live-iso/casper/vmlinuz
+            else
+              echo "ERROR: No kernel found!"
+              exit 1
+            fi
+          }
+          
+          sudo cp chroot-dir/boot/initrd.img-* live-iso/casper/initrd.lz 2>/dev/null || {
+            echo "No initrd found in chroot, trying server files"  
+            if [ -f ./initrd-server ]; then
+              cp ./initrd-server live-iso/casper/initrd.lz
+            else
+              echo "ERROR: No initrd found!"
+              exit 1
+            fi
+          }
+
+      - name: Create filesystem manifest
+        run: |
+          sudo chroot chroot-dir dpkg-query -W --showformat='${Package} ${Version}\n' > live-iso/casper/filesystem.manifest
+          cp live-iso/casper/filesystem.manifest live-iso/casper/filesystem.manifest-desktop
+          
+          # Remove casper itself from manifest to avoid issues
+          sed -i '/casper/d' live-iso/casper/filesystem.manifest-desktop
+
+      - name: Cleanup and unmount chroot
+        run: |
+          sudo umount chroot-dir/dev/pts 2>/dev/null || true
+          sudo umount chroot-dir/dev 2>/dev/null || true  
+          sudo umount chroot-dir/sys 2>/dev/null || true
+          sudo umount chroot-dir/proc 2>/dev/null || true
+
+      - name: Create squashfs filesystem
+        run: |
+          sudo mksquashfs chroot-dir live-iso/casper/filesystem.squashfs \
+            -noappend -no-recovery -always-use-fragments \
+            -b 1048576 -comp xz -Xdict-size 100%
+          
+          # Create filesystem size file
+          printf $(sudo du -sx --block-size=1 chroot-dir | cut -f1) > live-iso/casper/filesystem.size
+          
+          # Verify squashfs
+          echo "SquashFS created: $(ls -lh live-iso/casper/filesystem.squashfs)"
+
+      - name: Create ISOLINUX configuration
+        run: |
+          # Copy isolinux files
+          cp /usr/lib/ISOLINUX/isolinux.bin live-iso/isolinux/
+          cp /usr/lib/syslinux/modules/bios/menu.c32 live-iso/isolinux/
+          cp /usr/lib/syslinux/modules/bios/hdt.c32 live-iso/isolinux/
+          cp /usr/lib/syslinux/modules/bios/ldlinux.c32 live-iso/isolinux/
+          cp /usr/lib/syslinux/modules/bios/libutil.c32 live-iso/isolinux/
+          cp /usr/lib/syslinux/modules/bios/libmenu.c32 live-iso/isolinux/
+          cp /usr/lib/syslinux/modules/bios/libcom32.c32 live-iso/isolinux/
+          cp /usr/lib/syslinux/modules/bios/libgpl.c32 live-iso/isolinux/
+          
+          # Create isolinux config
+          cat > live-iso/isolinux/isolinux.cfg << 'EOF'
+DEFAULT live
+LABEL live
+  menu label ^Try Ubuntu without installing
+  kernel /casper/vmlinuz
+  append initrd=/casper/initrd.lz boot=live quiet splash ---
+
+LABEL live-install  
+  menu label ^Install Ubuntu
+  kernel /casper/vmlinuz
+  append initrd=/casper/initrd.lz boot=live only-ubiquity quiet splash ---
+
+LABEL check
+  menu label ^Check disc for defects
+  kernel /casper/vmlinuz
+  append initrd=/casper/initrd.lz boot=live media-check quiet splash ---
+
+LABEL memtest
+  menu label Test ^memory
+  kernel /install/memtest86+
+
+LABEL hd
+  menu label ^Boot from first hard disk
+  localboot 0x80
+EOF
+
+      - name: Create the ISO
+        run: |
+          # Create ISO using xorriso for better compatibility
+          xorriso -as mkisofs \
+            -iso-level 3 \
+            -full-iso9660-filenames \
+            -volid "Ubuntu 24.04 CLI Live" \
+            -eltorito-boot isolinux/isolinux.bin \
+            -eltorito-catalog isolinux/boot.cat \
+            -no-emul-boot \
+            -boot-load-size 4 \
+            -boot-info-table \
+            -eltorito-alt-boot \
+            -e boot/grub/efi.img \
+            -no-emul-boot \
+            -append_partition 2 0xef boot/grub/efi.img \
+            -output ubuntu-noble-cli-live.iso \
+            -graft-points \
+              "/.disk"=live-iso/.disk \
+              "/casper"=live-iso/casper \
+              "/isolinux"=live-iso/isolinux \
+              "/install"=live-iso/install \
+              "/preseed"=live-iso/preseed \
+              "/ubuntu"=live-iso/ubuntu 2>/dev/null || \
+          xorriso -as mkisofs \
+            -iso-level 3 \
+            -full-iso9660-filenames \
+            -volid "Ubuntu 24.04 CLI Live" \
+            -eltorito-boot isolinux/isolinux.bin \
+            -eltorito-catalog isolinux/boot.cat \
+            -no-emul-boot \
+            -boot-load-size 4 \
+            -boot-info-table \
+            -output ubuntu-noble-cli-live.iso \
+            live-iso/
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-noble-cli-live.iso
+          path: ubuntu-noble-cli-live.iso
