@@ -47,10 +47,9 @@ jobs:
 
       - name: Copy kernel and initrd
         run: |
-          KERNEL=$(ls live-iso/chroot/boot/vmlinuz-* | head -n1)
-          INITRD=$(ls live-iso/chroot/boot/initrd.img-* | head -n1)
-          sudo cp "$KERNEL" live-iso/iso/boot/vmlinuz
-          sudo cp "$INITRD" live-iso/iso/boot/initrd
+          mkdir -p live-iso/iso/boot
+          cp "$(readlink -f /boot/vmlinuz)" live-iso/iso/boot/vmlinuz
+          cp "$(readlink -f /boot/initrd.img)" live-iso/iso/boot/initrd
 
       - name: Create grub config
         run: |
