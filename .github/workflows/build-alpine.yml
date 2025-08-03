@@ -1,0 +1,39 @@
+# .github/workflows/build-alpine.yml
+name: Build Alpine Linux Live CLI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-alpine-live:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Build Alpine Linux Live CLI
+      uses: ./
+      with:
+        alpine-version: '3.19'
+        upload-artifacts: 'true'
+      
+    - name: Create Release (on tag)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          alpine-live-cli.iso
+          alpine-live-cli.iso.sha256
+          alpine-live-cli.iso.md5
+        body: |
+          ## Alpine Linux Live CLI
+          
+          Bootowalna dystrybucja Alpine Linux z narzędziami CLI
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
