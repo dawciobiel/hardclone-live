@@ -48,7 +48,7 @@ runs:
       run: |
         ALPINE_VERSION="${{ inputs.alpine-version }}"
         ALPINE_ARCH="x86_64"
-
+        
         echo "Downloading Alpine Linux ${ALPINE_VERSION}..."
         wget -O alpine-minirootfs.tar.gz \
           "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/${ALPINE_ARCH}/alpine-minirootfs-${ALPINE_VERSION}.0-${ALPINE_ARCH}.tar.gz"
@@ -59,10 +59,10 @@ runs:
         echo "Creating Alpine Live system structure..."
         mkdir -p alpine-live
         cd alpine-live
-
+        
         echo "Extracting Alpine mini root filesystem..."
         sudo tar -xzf ../alpine-minirootfs.tar.gz
-
+        
         echo "Setting up chroot environment..."
         sudo mount --bind /dev dev/
         sudo mount --bind /proc proc/
@@ -74,16 +74,16 @@ runs:
       run: |
         cd alpine-live
         echo "Installing base system packages..."
-
+        
         sudo chroot . /bin/sh -c '
         echo "Setting up repositories..."
         echo "http://dl-cdn.alpinelinux.org/alpine/v${{ inputs.alpine-version }}/main" > /etc/apk/repositories
         echo "http://dl-cdn.alpinelinux.org/alpine/v${{ inputs.alpine-version }}/community" >> /etc/apk/repositories
         echo "http://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories
-
+        
         echo "Updating package index..."
         apk update
-
+        
         echo "Installing base system..."
         apk add --no-cache \
           alpine-base \
@@ -101,7 +101,7 @@ runs:
       run: |
         cd alpine-live
         echo "Installing Python and development tools..."
-
+        
         sudo chroot . /bin/sh -c '
         echo "Installing Python 3.12 and development environment..."
         apk add --no-cache \
@@ -117,10 +117,7 @@ runs:
           musl-dev \
           linux-headers \
           pkgconfig \
-          git
-
-        echo "Installing Qt6 and PySide6 dependencies..."
-        apk add --no-cache \
+          git \
           qt6-qtbase \
           qt6-qtbase-dev \
           qt6-qtdeclarative \
@@ -146,7 +143,7 @@ runs:
       run: |
         cd alpine-live
         echo "Installing editors and CLI tools..."
-
+        
         sudo chroot . /bin/sh -c '
         echo "Installing shell and editors..."
         apk add --no-cache \
@@ -155,7 +152,7 @@ runs:
           neovim \
           nano \
           mc
-
+        
         echo "Installing disk utilities..."
         apk add --no-cache \
           util-linux \
@@ -164,7 +161,7 @@ runs:
           dosfstools \
           e2fsprogs \
           ntfs-3g
-
+        
         echo "Installing compression tools..."
         apk add --no-cache \
           gzip \
@@ -174,7 +171,7 @@ runs:
           tar \
           unzip \
           zip
-
+        
         echo "Installing additional utilities..."
         apk add --no-cache \
           gnupg \
@@ -195,7 +192,7 @@ runs:
       run: |
         cd alpine-live
         echo "Installing bootloader support..."
-
+        
         sudo chroot . /bin/sh -c '
         echo "Installing bootloader support..."
         apk add --no-cache \
@@ -204,29 +201,12 @@ runs:
           efibootmgr \
           syslinux
         '
-
+        
         echo "Attempting to install PySide6..."
         sudo chroot . /bin/sh -c '
-        # Try to install PySide6 via pip with specific index
-        pip3 install --break-system-packages --no-cache-dir --index-url https://pypi.org/simple/ PySide6==6.6.0 || \
-        pip3 install --break-system-packages --no-cache-dir PySide6 || \
-        echo "PySide6 installation failed, psutil is available via py3-psutil package"
-
-        # Verify psutil is available
-        python3 -c "import psutil; print(f\"psutil version: {psutil.__version__}\")" || echo "psutil not available"
-
-        # Test if any Qt/GUI libraries are available
-        python3 -c "
-try:
-    import PySide6.QtCore
-    print(\"PySide6 successfully installed\")
-except ImportError:
-    print(\"PySide6 not available - GUI applications will not work\")
-    print(\"Available Python packages:\")
-    import subprocess
-    result = subprocess.run([\"apk\", \"list\", \"-I\", \"py3-*\"], capture_output=True, text=True)
-    print(result.stdout)
-" || echo "Python test completed"
+        pip3 install --break-system-packages --no-cache-dir PySide6 || echo "PySide6 installation failed"
+        python3 -c "import psutil; print(\"psutil available\")" || echo "psutil test failed"
+        python3 -c "import PySide6.QtCore; print(\"PySide6 available\")" || echo "PySide6 not available"
         '
 
     - name: Configure Alpine system - Users and services
@@ -234,13 +214,13 @@ except ImportError:
       run: |
         cd alpine-live
         echo "Setting up users and services..."
-
+        
         sudo chroot . /bin/sh -c '
         echo "Setting up users..."
         adduser -D -s /bin/bash alpine
         echo "alpine:alpine" | chpasswd
         echo "root:alpine" | chpasswd
-
+        
         echo "Enabling essential services..."
         rc-update add devfs sysinit
         rc-update add dmesg sysinit
@@ -263,52 +243,52 @@ except ImportError:
       run: |
         cd alpine-live
         echo "Creating live system configuration..."
-
+        
         sudo chroot . /bin/sh -c '
         echo "Creating live boot configuration..."
-        printf "%s\n" \
-          "#!/bin/sh" \
-          "" \
-          "# Auto-login on console" \
-          "if [ ! -f /etc/inittab.orig ]; then" \
-          "  cp /etc/inittab /etc/inittab.orig" \
-          "  sed -i \"s/tty1::respawn:\/sbin\/getty 38400 tty1/tty1::respawn:\/sbin\/getty -a alpine 38400 tty1/\" /etc/inittab" \
-          "fi" \
-          "" \
-          "# Setup temporary directories" \
-          "mount -t tmpfs tmpfs /tmp" \
-          "mount -t tmpfs tmpfs /var/tmp" \
-          > /etc/local.d/live-config.start
-
+        cat > /etc/local.d/live-config.start << "EOF"
+        #!/bin/sh
+        
+        # Auto-login on console
+        if [ ! -f /etc/inittab.orig ]; then
+          cp /etc/inittab /etc/inittab.orig
+          sed -i "s/tty1::respawn:\/sbin\/getty 38400 tty1/tty1::respawn:\/sbin\/getty -a alpine 38400 tty1/" /etc/inittab
+        fi
+        
+        # Setup temporary directories
+        mount -t tmpfs tmpfs /tmp
+        mount -t tmpfs tmpfs /var/tmp
+        EOF
+        
         echo "Creating welcome message..."
-        printf "%s\n" \
-          "" \
-          "╔════════════════════════════════════════════════════════════════╗" \
-          "║                    Alpine Linux Live CLI                       ║" \
-          "║                                                                ║" \
-          "║  Default user: alpine (password: alpine)                      ║" \
-          "║  Root password: alpine                                         ║" \
-          "║                                                                ║" \
-          "║  Included tools:                                               ║" \
-          "║  • Python 3.12 with psutil (PySide6 optional)                ║" \
-          "║  • Editors: vim, nvim, nano, mc                               ║" \
-          "║  • Disk tools: dd, lsblk, parted, gdisk                      ║" \
-          "║  • Compression: gzip, zstd, bzip2, xz                        ║" \
-          "║  • Security: gpg, sha256sum, md5sum                           ║" \
-          "║                                                                ║" \
-          "╚════════════════════════════════════════════════════════════════╝" \
-          "" \
-          > /etc/motd
-
+        cat > /etc/motd << "EOF2"
+        
+        ╔════════════════════════════════════════════════════════════════╗
+        ║                    Alpine Linux Live CLI                       ║
+        ║                                                                ║
+        ║  Default user: alpine (password: alpine)                      ║
+        ║  Root password: alpine                                         ║
+        ║                                                                ║
+        ║  Included tools:                                               ║
+        ║  • Python 3.12 with psutil (PySide6 optional)                ║
+        ║  • Editors: vim, nvim, nano, mc                               ║
+        ║  • Disk tools: dd, lsblk, parted, gdisk                      ║
+        ║  • Compression: gzip, zstd, bzip2, xz                        ║
+        ║  • Security: gpg, sha256sum, md5sum                           ║
+        ║                                                                ║
+        ╚════════════════════════════════════════════════════════════════╝
+        
+        EOF2
+        
         chmod +x /etc/local.d/live-config.start
         rc-update add local default
-
+        
         echo "Cleaning up..."
         apk cache clean
         rm -rf /var/cache/apk/*
         rm -rf /tmp/*
         '
-
+        
         echo "Cleaning up chroot mounts..."
         sudo umount dev/ proc/ sys/ || true
 
@@ -317,22 +297,22 @@ except ImportError:
       run: |
         cd alpine-live
         echo "Creating initramfs and extracting kernel..."
-
+        
         sudo mount --bind /dev dev/
         sudo mount --bind /proc proc/
         sudo mount --bind /sys sys/
-
+        
         echo "Creating initramfs..."
         KERNEL_VERSION=$(ls lib/modules/ | head -1)
         sudo chroot . mkinitfs -o /boot/initramfs-live "$KERNEL_VERSION"
-
+        
         echo "Copying kernel..."
         sudo cp boot/vmlinuz-lts boot/vmlinuz-live 2>/dev/null || sudo cp boot/vmlinuz-* boot/vmlinuz-live
-
+        
         echo "Copying boot files to host..."
         sudo cp boot/vmlinuz-live ../
         sudo cp boot/initramfs-live ../
-
+        
         echo "Cleaning up mounts..."
         sudo umount dev/ proc/ sys/ || true
 
@@ -344,7 +324,7 @@ except ImportError:
           -comp xz \
           -e boot/vmlinuz-live \
           -e boot/initramfs-live
-
+        
         echo "SquashFS created: $(ls -lh alpine-live.squashfs)"
 
     - name: Create bootable ISO with UEFI support
@@ -352,47 +332,47 @@ except ImportError:
       run: |
         echo "Creating bootable ISO structure..."
         mkdir -p iso-build/{boot/grub,efi/boot,live}
-
+        
         echo "Copying kernel and initramfs..."
         cp vmlinuz-live iso-build/boot/
         cp initramfs-live iso-build/boot/
-
+        
         echo "Copying live system..."
         cp alpine-live.squashfs iso-build/live/
-
-        echo "Creating GRUB configuration for UEFI..."
-        printf "%s\n" \
-          "set timeout=10" \
-          "set default=0" \
-          "" \
-          "menuentry \"Alpine Linux Live CLI\" {" \
-          "    linux /boot/vmlinuz-live boot=live live-media-path=/live quiet" \
-          "    initrd /boot/initramfs-live" \
-          "}" \
-          "" \
-          "menuentry \"Alpine Linux Live CLI (Debug)\" {" \
-          "    linux /boot/vmlinuz-live boot=live live-media-path=/live debug" \
-          "    initrd /boot/initramfs-live" \
-          "}" \
-          > iso-build/efi/boot/grub.cfg
-
+        
+        echo "Creating GRUB configuration..."
+        cat > iso-build/efi/boot/grub.cfg << 'GRUBEOF'
+        set timeout=10
+        set default=0
+        
+        menuentry "Alpine Linux Live CLI" {
+            linux /boot/vmlinuz-live boot=live live-media-path=/live quiet
+            initrd /boot/initramfs-live
+        }
+        
+        menuentry "Alpine Linux Live CLI (Debug)" {
+            linux /boot/vmlinuz-live boot=live live-media-path=/live debug
+            initrd /boot/initramfs-live
+        }
+        GRUBEOF
+        
         echo "Creating legacy GRUB configuration..."
         cp iso-build/efi/boot/grub.cfg iso-build/boot/grub/
-
+        
         echo "Creating GRUB EFI bootloader..."
         grub-mkimage -o iso-build/efi/boot/bootx64.efi -p /efi/boot -O x86_64-efi \
           part_gpt part_msdos fat ext2 iso9660 chain boot configfile normal \
           minicmd search search_fs_file search_fs_uuid search_label linux \
           gfxterm gettext echo true test regexp probe
-
+        
         echo "Creating legacy GRUB bootloader..."
         mkdir -p iso-build/boot/grub/i386-pc
         grub-mkimage -o iso-build/boot/grub/i386-pc/core.img -p /boot/grub -O i386-pc \
           biosdisk part_msdos part_gpt fat ext2 iso9660 chain boot configfile normal \
           minicmd search search_fs_file search_fs_uuid search_label linux echo true test regexp probe
-
+        
         cat /usr/lib/grub/i386-pc/cdboot.img iso-build/boot/grub/i386-pc/core.img > iso-build/boot/grub/i386-pc/eltorito.img
-
+        
         echo "Building hybrid ISO with UEFI and BIOS support..."
         xorriso -as mkisofs \
           -iso-level 3 \
@@ -411,7 +391,7 @@ except ImportError:
           -isohybrid-gpt-basdat \
           -output alpine-live-cli.iso \
           iso-build/
-
+        
         echo "ISO created successfully!"
 
     - name: Generate checksums
@@ -420,7 +400,7 @@ except ImportError:
         echo "Generating checksums..."
         sha256sum alpine-live-cli.iso > alpine-live-cli.iso.sha256
         md5sum alpine-live-cli.iso > alpine-live-cli.iso.md5
-
+        
         echo "Build completed successfully!"
         echo "Files created:"
         ls -lh alpine-live-cli.iso*
