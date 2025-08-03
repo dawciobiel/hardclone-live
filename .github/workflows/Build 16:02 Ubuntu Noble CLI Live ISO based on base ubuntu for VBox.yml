@@ -1,0 +1,397 @@
+name: Build 16:02 Ubuntu Noble CLI Live ISO based on base ubuntu for VBox
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install required packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y debootstrap xorriso isolinux squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools wget
+
+      - name: Download Ubuntu Live ISO for reference (optional)
+        run: |
+          # Download Ubuntu Desktop Live ISO as reference - but don't fail if not available
+          wget -O ubuntu-desktop.iso http://releases.ubuntu.com/24.04/ubuntu-24.04.1-desktop-amd64.iso || echo "Desktop ISO download failed, continuing..."
+
+      - name: Extract kernel and initrd from ISO (optional)
+        run: |
+          # Try to mount the desktop ISO if available to extract kernel/initrd as backup
+          if [ -f ubuntu-desktop.iso ]; then
+            mkdir -p desktop-mount
+            sudo mount -o loop ubuntu-desktop.iso desktop-mount 2>/dev/null || true
+            
+            # Try to find kernel and initrd in the desktop ISO
+            if [ -f desktop-mount/casper/vmlinuz ]; then
+              cp desktop-mount/casper/vmlinuz ./vmlinuz-backup
+              echo "Found backup kernel"
+            fi
+            if [ -f desktop-mount/casper/initrd ]; then
+              cp desktop-mount/casper/initrd ./initrd-backup
+              echo "Found backup initrd"
+            fi
+            
+            sudo umount desktop-mount 2>/dev/null || true
+            rm -rf desktop-mount
+          fi
+
+      - name: Bootstrap Ubuntu Noble system
+        run: |
+          # Use a more complete debootstrap
+          sudo debootstrap --arch=amd64 --include=systemd-sysv,dbus,sudo,adduser,passwd,init noble chroot-dir http://archive.ubuntu.com/ubuntu/
+
+      - name: Configure system inside chroot  
+        run: |
+          sudo cp /etc/resolv.conf chroot-dir/etc/
+          
+          # Mount necessary filesystems
+          sudo mount --bind /proc chroot-dir/proc
+          sudo mount --bind /sys chroot-dir/sys
+          sudo mount --bind /dev chroot-dir/dev
+          sudo mount --bind /dev/pts chroot-dir/dev/pts
+          
+          sudo chroot chroot-dir /bin/bash -c "
+            export DEBIAN_FRONTEND=noninteractive
+            export LC_ALL=C
+            
+            # Update and install packages
+            apt-get update
+            apt-get install -y ubuntu-standard ubuntu-minimal
+            
+            # Install live-boot components FIRST
+            apt-get install -y casper lupin-casper live-boot live-boot-initramfs-tools
+            apt-get install -y live-config live-config-systemd
+            
+            # Install kernel - be more explicit about this
+            echo 'Installing kernel...'
+            apt-get install -y linux-image-generic linux-modules-extra-generic linux-firmware
+            
+            # Verify kernel installation
+            echo 'Checking kernel installation...'
+            ls -la /boot/
+            ls -la /lib/modules/
+            
+            # Install more essential packages for debugging
+            apt-get install -y initramfs-tools busybox-initramfs
+            apt-get install -y network-manager openssh-server
+            apt-get install -y vim nano curl wget
+            apt-get install -y console-setup kbd
+            apt-get install -y rsyslog systemd-sysv
+            apt-get install -y util-linux mount
+            
+            # Install packages needed for proper boot
+            apt-get install -y plymouth plymouth-theme-ubuntu-text
+            apt-get install -y udev kmod
+            apt-get install -y dbus-user-session
+            
+            # Ensure we have proper console drivers
+            apt-get install -y linux-modules-extra-generic
+            
+            # Install essential live system packages
+            apt-get install -y casper-md5check discover laptop-detect os-prober
+            
+            # Configure system
+            echo 'ubuntu-live' > /etc/hostname
+            echo '127.0.0.1 localhost' > /etc/hosts
+            echo '127.0.1.1 ubuntu-live' >> /etc/hosts
+            
+            # Create live user manually as backup
+            adduser --disabled-password --gecos 'Live User' liveuser || true
+            echo 'liveuser:' | chpasswd -e
+            usermod -aG sudo liveuser || true
+            echo 'liveuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+            
+            # Configure auto-login with proper console setup
+            mkdir -p /etc/systemd/system/getty@tty1.service.d
+            printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin liveuser --noclear %%I \$TERM\nStandardInput=tty\nStandardOutput=tty\n' > /etc/systemd/system/getty@tty1.service.d/override.conf
+            
+            # Ensure console is properly configured
+            echo 'ACTIVE_CONSOLES=\"/dev/tty[1-6]\"' >> /etc/default/console-setup
+            echo 'CHARMAP=\"UTF-8\"' >> /etc/default/console-setup
+            
+            # Configure live-boot properly
+            mkdir -p /etc/live/config
+            echo 'export LIVE_USERNAME=liveuser' > /etc/live/config.conf
+            echo 'export LIVE_HOSTNAME=ubuntu-live' >> /etc/live/config.conf
+            echo 'export LIVE_USER_FULLNAME=\"Live User\"' >> /etc/live/config.conf
+            echo 'export LIVE_LOCALES=en_US.UTF-8' >> /etc/live/config.conf
+            
+            # Create live-config hook
+            mkdir -p /lib/live/config
+            echo '#!/bin/sh' > /lib/live/config/0010-create-user
+            echo 'set -e' >> /lib/live/config/0010-create-user
+            echo 'if [ ! -d /home/liveuser ]; then' >> /lib/live/config/0010-create-user
+            echo '  adduser --disabled-password --gecos \"Live User\" liveuser' >> /lib/live/config/0010-create-user
+            echo '  echo \"liveuser:\" | chpasswd -e' >> /lib/live/config/0010-create-user
+            echo '  usermod -aG sudo liveuser' >> /lib/live/config/0010-create-user
+            echo '  echo \"liveuser ALL=(ALL) NOPASSWD: ALL\" >> /etc/sudoers' >> /lib/live/config/0010-create-user
+            echo 'fi' >> /lib/live/config/0010-create-user
+            chmod +x /lib/live/config/0010-create-user
+            
+            # Configure initramfs with more modules
+            echo 'BOOT=live' >> /etc/initramfs-tools/initramfs.conf
+            echo 'MODULES=most' >> /etc/initramfs-tools/initramfs.conf
+            echo 'COMPRESS=gzip' >> /etc/initramfs-tools/initramfs.conf
+            echo 'KEYMAP=y' >> /etc/initramfs-tools/initramfs.conf
+            
+            # Add required modules for live boot
+            echo 'squashfs' >> /etc/initramfs-tools/modules  
+            echo 'overlay' >> /etc/initramfs-tools/modules
+            echo 'loop' >> /etc/initramfs-tools/modules
+            echo 'iso9660' >> /etc/initramfs-tools/modules
+            echo 'udf' >> /etc/initramfs-tools/modules
+            echo 'vfat' >> /etc/initramfs-tools/modules
+            echo 'ext4' >> /etc/initramfs-tools/modules
+            
+            # Add basic console and keyboard modules
+            echo 'atkbd' >> /etc/initramfs-tools/modules
+            echo 'i8042' >> /etc/initramfs-tools/modules
+            
+            # Generate initramfs for all kernels
+            echo 'Generating initramfs...'
+            update-initramfs -u || update-initramfs -c -k all
+            
+            # Verify initramfs generation
+            echo 'Checking initramfs generation...'
+            ls -la /boot/
+            
+            # Configure network
+            systemctl enable NetworkManager
+            systemctl enable ssh
+            
+            # Clean up
+            apt-get autoremove -y
+            apt-get autoclean
+            rm -rf /var/lib/apt/lists/*
+            rm -rf /tmp/*
+            rm -rf /var/tmp/*
+          "
+
+      - name: Prepare ISO structure
+        run: |
+          mkdir -p live-iso/{isolinux,install,casper,preseed,.disk}
+          
+          # Create disk info
+          echo 'Ubuntu 24.04 LTS \"Noble Numbat\" - CLI Live' > live-iso/.disk/info
+          echo 'https://www.ubuntu.com/' > live-iso/.disk/release_notes_url
+          touch live-iso/.disk/base_installable
+          echo 'main restricted' > live-iso/.disk/base_components
+          echo 'not supported' > live-iso/.disk/cd_type
+          touch live-iso/ubuntu
+          
+          # Create empty preseed
+          touch live-iso/preseed/ubuntu.seed
+
+      - name: Debug and copy kernel and initrd
+        run: |
+          # Debug: Check what's in /boot
+          echo "=== Contents of chroot-dir/boot ==="
+          sudo ls -la chroot-dir/boot/ || echo "No /boot directory found"
+          
+          echo "=== Contents of chroot-dir/lib/modules ==="
+          sudo ls -la chroot-dir/lib/modules/ || echo "No /lib/modules directory found"
+          
+          # Copy kernel and initrd from chroot (primary method)
+          if sudo ls chroot-dir/boot/vmlinuz-* 1>/dev/null 2>&1; then
+            sudo cp chroot-dir/boot/vmlinuz-* live-iso/casper/vmlinuz
+            echo "Copied vmlinuz from chroot"
+          elif [ -f ./vmlinuz-backup ]; then
+            cp ./vmlinuz-backup live-iso/casper/vmlinuz
+            echo "Used backup vmlinuz"
+          else
+            echo "ERROR: No kernel found!"
+            echo "Trying to install kernel manually..."
+            
+            # Try to install kernel manually if missing
+            sudo chroot chroot-dir /bin/bash -c "
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y --reinstall linux-image-generic
+              ls -la /boot/
+            "
+            
+            if sudo ls chroot-dir/boot/vmlinuz-* 1>/dev/null 2>&1; then
+              sudo cp chroot-dir/boot/vmlinuz-* live-iso/casper/vmlinuz
+              echo "Kernel installed and copied successfully"
+            else
+              echo "FATAL: Still no kernel found after manual installation!"
+              exit 1
+            fi
+          fi
+          
+          if sudo ls chroot-dir/boot/initrd.img-* 1>/dev/null 2>&1; then
+            sudo cp chroot-dir/boot/initrd.img-* live-iso/casper/initrd.lz
+            echo "Copied initrd from chroot"
+          elif [ -f ./initrd-backup ]; then
+            cp ./initrd-backup live-iso/casper/initrd.lz
+            echo "Used backup initrd"
+          else
+            echo "WARNING: No initrd found, trying to generate..."
+            
+            # Try to generate initrd manually
+            sudo chroot chroot-dir /bin/bash -c "
+              export DEBIAN_FRONTEND=noninteractive
+              KERNEL_VERSION=\$(ls /lib/modules/ | head -n1)
+              if [ -n \"\$KERNEL_VERSION\" ]; then
+                echo \"Generating initrd for kernel: \$KERNEL_VERSION\"
+                update-initramfs -c -k \$KERNEL_VERSION || mkinitramfs -o /boot/initrd.img-\$KERNEL_VERSION \$KERNEL_VERSION
+                ls -la /boot/
+              fi
+            "
+            
+            if sudo ls chroot-dir/boot/initrd.img-* 1>/dev/null 2>&1; then
+              sudo cp chroot-dir/boot/initrd.img-* live-iso/casper/initrd.lz
+              echo "Initrd generated and copied successfully"
+            else
+              echo "FATAL: No initrd found after generation attempt!"
+              exit 1
+            fi
+          fi
+
+      - name: Create filesystem manifest
+        run: |
+          sudo chroot chroot-dir dpkg-query -W --showformat='${Package} ${Version}\n' > live-iso/casper/filesystem.manifest
+          cp live-iso/casper/filesystem.manifest live-iso/casper/filesystem.manifest-desktop
+          
+          # Remove casper itself from manifest to avoid issues
+          sed -i '/casper/d' live-iso/casper/filesystem.manifest-desktop
+
+      - name: Cleanup and unmount chroot
+        run: |
+          sudo umount chroot-dir/dev/pts 2>/dev/null || true
+          sudo umount chroot-dir/dev 2>/dev/null || true  
+          sudo umount chroot-dir/sys 2>/dev/null || true
+          sudo umount chroot-dir/proc 2>/dev/null || true
+
+      - name: Create squashfs filesystem
+        run: |
+          sudo mksquashfs chroot-dir live-iso/casper/filesystem.squashfs \
+            -noappend -no-recovery -always-use-fragments \
+            -b 1048576 -comp xz -Xdict-size 100%
+          
+          # Create filesystem size file
+          printf $(sudo du -sx --block-size=1 chroot-dir | cut -f1) > live-iso/casper/filesystem.size
+          
+          # Verify squashfs
+          echo "SquashFS created: $(ls -lh live-iso/casper/filesystem.squashfs)"
+
+      - name: Fix permissions for ISO creation
+        run: |
+          # Fix ownership and permissions of all files in live-iso directory
+          sudo chown -R $USER:$USER live-iso/
+          chmod -R 755 live-iso/
+          
+          # Ensure kernel and initrd are readable
+          if [ -f live-iso/casper/vmlinuz ]; then
+            chmod 644 live-iso/casper/vmlinuz
+            echo "Fixed vmlinuz permissions"
+          fi
+          
+          if [ -f live-iso/casper/initrd.lz ]; then
+            chmod 644 live-iso/casper/initrd.lz
+            echo "Fixed initrd permissions"
+          fi
+          
+          # Verify permissions
+          echo "=== Checking permissions ==="
+          ls -la live-iso/casper/
+
+      - name: Create ISOLINUX configuration
+        run: |
+          # Copy isolinux files
+          cp /usr/lib/ISOLINUX/isolinux.bin live-iso/isolinux/
+          cp /usr/lib/syslinux/modules/bios/menu.c32 live-iso/isolinux/
+          cp /usr/lib/syslinux/modules/bios/hdt.c32 live-iso/isolinux/
+          cp /usr/lib/syslinux/modules/bios/ldlinux.c32 live-iso/isolinux/
+          cp /usr/lib/syslinux/modules/bios/libutil.c32 live-iso/isolinux/
+          cp /usr/lib/syslinux/modules/bios/libmenu.c32 live-iso/isolinux/
+          cp /usr/lib/syslinux/modules/bios/libcom32.c32 live-iso/isolinux/
+          cp /usr/lib/syslinux/modules/bios/libgpl.c32 live-iso/isolinux/
+          
+          # Create isolinux config with better boot options
+          echo "UI menu.c32" > live-iso/isolinux/isolinux.cfg
+          echo "PROMPT 0" >> live-iso/isolinux/isolinux.cfg
+          echo "MENU TITLE Ubuntu 24.04 CLI Live" >> live-iso/isolinux/isolinux.cfg
+          echo "TIMEOUT 300" >> live-iso/isolinux/isolinux.cfg
+          echo "DEFAULT live" >> live-iso/isolinux/isolinux.cfg
+          echo "" >> live-iso/isolinux/isolinux.cfg
+          echo "LABEL live" >> live-iso/isolinux/isolinux.cfg
+          echo "  MENU LABEL ^Try Ubuntu CLI Live" >> live-iso/isolinux/isolinux.cfg
+          echo "  KERNEL /casper/vmlinuz" >> live-iso/isolinux/isolinux.cfg
+          echo "  APPEND initrd=/casper/initrd.lz boot=live config components quiet splash nomodeset vga=normal" >> live-iso/isolinux/isolinux.cfg
+          echo "" >> live-iso/isolinux/isolinux.cfg
+          echo "LABEL live-debug" >> live-iso/isolinux/isolinux.cfg
+          echo "  MENU LABEL ^Try Ubuntu CLI Live (Debug Mode)" >> live-iso/isolinux/isolinux.cfg
+          echo "  KERNEL /casper/vmlinuz" >> live-iso/isolinux/isolinux.cfg
+          echo "  APPEND initrd=/casper/initrd.lz boot=live config components debug=1 systemd.log_level=debug" >> live-iso/isolinux/isolinux.cfg
+          echo "" >> live-iso/isolinux/isolinux.cfg
+          echo "LABEL live-safe" >> live-iso/isolinux/isolinux.cfg
+          echo "  MENU LABEL ^Try Ubuntu CLI Live (Safe Graphics)" >> live-iso/isolinux/isolinux.cfg
+          echo "  KERNEL /casper/vmlinuz" >> live-iso/isolinux/isolinux.cfg
+          echo "  APPEND initrd=/casper/initrd.lz boot=live config components nomodeset vga=normal acpi=off noapic nosplash" >> live-iso/isolinux/isolinux.cfg
+          echo "" >> live-iso/isolinux/isolinux.cfg
+          echo "LABEL live-text" >> live-iso/isolinux/isolinux.cfg
+          echo "  MENU LABEL ^Try Ubuntu CLI Live (Text Mode)" >> live-iso/isolinux/isolinux.cfg
+          echo "  KERNEL /casper/vmlinuz" >> live-iso/isolinux/isolinux.cfg
+          echo "  APPEND initrd=/casper/initrd.lz boot=live config components systemd.unit=multi-user.target nomodeset text" >> live-iso/isolinux/isolinux.cfg
+          echo "" >> live-iso/isolinux/isolinux.cfg
+          echo "LABEL hd" >> live-iso/isolinux/isolinux.cfg
+          echo "  MENU LABEL ^Boot from first hard disk" >> live-iso/isolinux/isolinux.cfg
+          echo "  LOCALBOOT 0x80" >> live-iso/isolinux/isolinux.cfg
+
+      - name: Create the ISO
+        run: |
+          # Generate ISO filename with current date and time
+          ISO_DATE=$(date +%Y-%m-%d_%H-%M)
+          ISO_FILENAME="ubuntu-noble-cli-live-${ISO_DATE}.iso"
+          echo "Creating ISO: $ISO_FILENAME"
+          
+          # Create ISO using xorriso for better compatibility
+          xorriso -as mkisofs \
+            -iso-level 3 \
+            -full-iso9660-filenames \
+            -volid "Ubuntu_24_04_CLI_Live" \
+            -eltorito-boot isolinux/isolinux.bin \
+            -eltorito-catalog isolinux/boot.cat \
+            -no-emul-boot \
+            -boot-load-size 4 \
+            -boot-info-table \
+            -eltorito-alt-boot \
+            -e boot/grub/efi.img \
+            -no-emul-boot \
+            -append_partition 2 0xef boot/grub/efi.img \
+            -output "$ISO_FILENAME" \
+            -graft-points \
+              "/.disk"=live-iso/.disk \
+              "/casper"=live-iso/casper \
+              "/isolinux"=live-iso/isolinux \
+              "/install"=live-iso/install \
+              "/preseed"=live-iso/preseed \
+              "/ubuntu"=live-iso/ubuntu 2>/dev/null || \
+          xorriso -as mkisofs \
+            -iso-level 3 \
+            -full-iso9660-filenames \
+            -volid "Ubuntu_24_04_CLI_Live" \
+            -eltorito-boot isolinux/isolinux.bin \
+            -eltorito-catalog isolinux/boot.cat \
+            -no-emul-boot \
+            -boot-load-size 4 \
+            -boot-info-table \
+            -output "$ISO_FILENAME" \
+            live-iso/
+          
+          # Make filename available for upload step
+          echo "ISO_FILENAME=$ISO_FILENAME" >> $GITHUB_ENV
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ISO_FILENAME }}
+          path: ${{ env.ISO_FILENAME }}
