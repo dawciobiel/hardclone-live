@@ -1,4 +1,4 @@
-name: Build 10:47 Ubuntu Noble CLI Live ISO based on base Ubuntu
+name: Build Ubuntu Noble CLI Live ISO based on regular Ubuntu
 
 on:
   workflow_dispatch:
@@ -275,6 +275,11 @@ jobs:
 
       - name: Create the ISO
         run: |
+          # Generate ISO filename with current date and time
+          ISO_DATE=$(date +%Y-%m-%d_%H-%M)
+          ISO_FILENAME="ubuntu-noble-cli-live-${ISO_DATE}.iso"
+          echo "Creating ISO: $ISO_FILENAME"
+          
           # Create ISO using xorriso for better compatibility
           xorriso -as mkisofs \
             -iso-level 3 \
@@ -289,7 +294,7 @@ jobs:
             -e boot/grub/efi.img \
             -no-emul-boot \
             -append_partition 2 0xef boot/grub/efi.img \
-            -output ubuntu-noble-cli-live.iso \
+            -output "$ISO_FILENAME" \
             -graft-points \
               "/.disk"=live-iso/.disk \
               "/casper"=live-iso/casper \
@@ -306,11 +311,14 @@ jobs:
             -no-emul-boot \
             -boot-load-size 4 \
             -boot-info-table \
-            -output ubuntu-noble-cli-live.iso \
+            -output "$ISO_FILENAME" \
             live-iso/
+          
+          # Make filename available for upload step
+          echo "ISO_FILENAME=$ISO_FILENAME" >> $GITHUB_ENV
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ubuntu-noble-cli-live.iso
-          path: ubuntu-noble-cli-live.iso
+          name: ${{ env.ISO_FILENAME }}
+          path: ${{ env.ISO_FILENAME }}
