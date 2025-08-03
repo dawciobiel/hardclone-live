@@ -1,4 +1,4 @@
-name: Build 16:28 Ubuntu Noble CLI Live ISO based on base Ubuntu for VBox
+name: Build 18:50 VBox Ubuntu Noble CLI Live ISO based on base Ubuntu
 
 on:
   workflow_dispatch:
