@@ -294,37 +294,35 @@ jobs:
           cp /usr/lib/syslinux/modules/bios/libgpl.c32 live-iso/isolinux/
           
           # Create isolinux config with better boot options
-          cat > live-iso/isolinux/isolinux.cfg << EOF
-UI menu.c32
-PROMPT 0
-MENU TITLE Ubuntu 24.04 CLI Live
-TIMEOUT 300
-DEFAULT live
-
-LABEL live
-  MENU LABEL ^Try Ubuntu CLI Live
-  KERNEL /casper/vmlinuz
-  APPEND initrd=/casper/initrd.lz boot=live components quiet splash nomodeset vga=normal
-
-LABEL live-debug
-  MENU LABEL ^Try Ubuntu CLI Live (Debug Mode)
-  KERNEL /casper/vmlinuz
-  APPEND initrd=/casper/initrd.lz boot=live components debug=1 systemd.log_level=debug
-
-LABEL live-safe
-  MENU LABEL ^Try Ubuntu CLI Live (Safe Graphics)
-  KERNEL /casper/vmlinuz
-  APPEND initrd=/casper/initrd.lz boot=live components nomodeset vga=normal acpi=off noapic nosplash
-
-LABEL live-text
-  MENU LABEL ^Try Ubuntu CLI Live (Text Mode)
-  KERNEL /casper/vmlinuz
-  APPEND initrd=/casper/initrd.lz boot=live components systemd.unit=multi-user.target nomodeset text
-
-LABEL hd
-  MENU LABEL ^Boot from first hard disk
-  LOCALBOOT 0x80
-EOF
+          echo "UI menu.c32" > live-iso/isolinux/isolinux.cfg
+          echo "PROMPT 0" >> live-iso/isolinux/isolinux.cfg
+          echo "MENU TITLE Ubuntu 24.04 CLI Live" >> live-iso/isolinux/isolinux.cfg
+          echo "TIMEOUT 300" >> live-iso/isolinux/isolinux.cfg
+          echo "DEFAULT live" >> live-iso/isolinux/isolinux.cfg
+          echo "" >> live-iso/isolinux/isolinux.cfg
+          echo "LABEL live" >> live-iso/isolinux/isolinux.cfg
+          echo "  MENU LABEL ^Try Ubuntu CLI Live" >> live-iso/isolinux/isolinux.cfg
+          echo "  KERNEL /casper/vmlinuz" >> live-iso/isolinux/isolinux.cfg
+          echo "  APPEND initrd=/casper/initrd.lz boot=live components quiet splash nomodeset vga=normal" >> live-iso/isolinux/isolinux.cfg
+          echo "" >> live-iso/isolinux/isolinux.cfg
+          echo "LABEL live-debug" >> live-iso/isolinux/isolinux.cfg
+          echo "  MENU LABEL ^Try Ubuntu CLI Live (Debug Mode)" >> live-iso/isolinux/isolinux.cfg
+          echo "  KERNEL /casper/vmlinuz" >> live-iso/isolinux/isolinux.cfg
+          echo "  APPEND initrd=/casper/initrd.lz boot=live components debug=1 systemd.log_level=debug" >> live-iso/isolinux/isolinux.cfg
+          echo "" >> live-iso/isolinux/isolinux.cfg
+          echo "LABEL live-safe" >> live-iso/isolinux/isolinux.cfg
+          echo "  MENU LABEL ^Try Ubuntu CLI Live (Safe Graphics)" >> live-iso/isolinux/isolinux.cfg
+          echo "  KERNEL /casper/vmlinuz" >> live-iso/isolinux/isolinux.cfg
+          echo "  APPEND initrd=/casper/initrd.lz boot=live components nomodeset vga=normal acpi=off noapic nosplash" >> live-iso/isolinux/isolinux.cfg
+          echo "" >> live-iso/isolinux/isolinux.cfg
+          echo "LABEL live-text" >> live-iso/isolinux/isolinux.cfg
+          echo "  MENU LABEL ^Try Ubuntu CLI Live (Text Mode)" >> live-iso/isolinux/isolinux.cfg
+          echo "  KERNEL /casper/vmlinuz" >> live-iso/isolinux/isolinux.cfg
+          echo "  APPEND initrd=/casper/initrd.lz boot=live components systemd.unit=multi-user.target nomodeset text" >> live-iso/isolinux/isolinux.cfg
+          echo "" >> live-iso/isolinux/isolinux.cfg
+          echo "LABEL hd" >> live-iso/isolinux/isolinux.cfg
+          echo "  MENU LABEL ^Boot from first hard disk" >> live-iso/isolinux/isolinux.cfg
+          echo "  LOCALBOOT 0x80" >> live-iso/isolinux/isolinux.cfg
 
       - name: Create the ISO
         run: |
