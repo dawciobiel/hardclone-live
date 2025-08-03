@@ -1,4 +1,4 @@
-name: Build Ubuntu Noble CLI Live ISO based on base ubuntu
+name: Build 10:47 Ubuntu Noble CLI Live ISO based on base Ubuntu
 
 on:
   workflow_dispatch:
@@ -237,6 +237,27 @@ jobs:
           # Verify squashfs
           echo "SquashFS created: $(ls -lh live-iso/casper/filesystem.squashfs)"
 
+      - name: Fix permissions for ISO creation
+        run: |
+          # Fix ownership and permissions of all files in live-iso directory
+          sudo chown -R $USER:$USER live-iso/
+          chmod -R 755 live-iso/
+          
+          # Ensure kernel and initrd are readable
+          if [ -f live-iso/casper/vmlinuz ]; then
+            chmod 644 live-iso/casper/vmlinuz
+            echo "Fixed vmlinuz permissions"
+          fi
+          
+          if [ -f live-iso/casper/initrd.lz ]; then
+            chmod 644 live-iso/casper/initrd.lz
+            echo "Fixed initrd permissions"
+          fi
+          
+          # Verify permissions
+          echo "=== Checking permissions ==="
+          ls -la live-iso/casper/
+
       - name: Create ISOLINUX configuration
         run: |
           # Copy isolinux files
@@ -258,7 +279,7 @@ jobs:
           xorriso -as mkisofs \
             -iso-level 3 \
             -full-iso9660-filenames \
-            -volid "Ubuntu 24.04 CLI Live" \
+            -volid "Ubuntu_24_04_CLI_Live" \
             -eltorito-boot isolinux/isolinux.bin \
             -eltorito-catalog isolinux/boot.cat \
             -no-emul-boot \
@@ -279,7 +300,7 @@ jobs:
           xorriso -as mkisofs \
             -iso-level 3 \
             -full-iso9660-filenames \
-            -volid "Ubuntu 24.04 CLI Live" \
+            -volid "Ubuntu_24_04_CLI_Live" \
             -eltorito-boot isolinux/isolinux.bin \
             -eltorito-catalog isolinux/boot.cat \
             -no-emul-boot \
