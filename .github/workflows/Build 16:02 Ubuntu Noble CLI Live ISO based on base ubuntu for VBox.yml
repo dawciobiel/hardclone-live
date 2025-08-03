@@ -1,4 +1,4 @@
-name: Build 16:02 Ubuntu Noble CLI Live ISO based on base ubuntu for VBox
+name: Build 16:07 Ubuntu Noble CLI Live ISO based on base ubuntu for VBox
 
 on:
   workflow_dispatch:
@@ -321,6 +321,10 @@ jobs:
           echo "MENU TITLE Ubuntu 24.04 CLI Live" >> live-iso/isolinux/isolinux.cfg
           echo "TIMEOUT 300" >> live-iso/isolinux/isolinux.cfg
           echo "DEFAULT live" >> live-iso/isolinux/isolinux.cfg
+          echo "LABEL live-vbox" >> live-iso/isolinux/isolinux.cfg
+          echo "  MENU LABEL ^Try Ubuntu CLI Live (VirtualBox)" >> live-iso/isolinux/isolinux.cfg
+          echo "  KERNEL /casper/vmlinuz" >> live-iso/isolinux/isolinux.cfg
+          echo "  APPEND initrd=/casper/initrd.lz boot=live config components nomodeset vga=normal acpi=ht noapic nosplash pci=nomsi irqpoll" >> live-iso/isolinux/isolinux.cfg
           echo "" >> live-iso/isolinux/isolinux.cfg
           echo "LABEL live" >> live-iso/isolinux/isolinux.cfg
           echo "  MENU LABEL ^Try Ubuntu CLI Live" >> live-iso/isolinux/isolinux.cfg
@@ -395,3 +399,4 @@ jobs:
         with:
           name: ${{ env.ISO_FILENAME }}
           path: ${{ env.ISO_FILENAME }}
+          compression-level: 0
