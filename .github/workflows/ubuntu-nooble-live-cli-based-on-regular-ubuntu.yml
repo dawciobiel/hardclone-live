@@ -1,4 +1,4 @@
-name: Build Ubuntu Noble CLI Live ISO based on base ubuntu
+name: Build 13:10 Ubuntu Noble CLI Live ISO based on base ubuntu
 
 on:
   workflow_dispatch:
@@ -102,13 +102,7 @@ jobs:
             
             # Configure auto-login with proper console setup
             mkdir -p /etc/systemd/system/getty@tty1.service.d
-            cat > /etc/systemd/system/getty@tty1.service.d/override.conf << 'EOFCONF'
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin liveuser --noclear %I \$TERM
-StandardInput=tty
-StandardOutput=tty
-EOFCONF
+            printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin liveuser --noclear %%I \$TERM\nStandardInput=tty\nStandardOutput=tty\n' > /etc/systemd/system/getty@tty1.service.d/override.conf
             
             # Ensure console is properly configured
             echo 'ACTIVE_CONSOLES=\"/dev/tty[1-6]\"' >> /etc/default/console-setup
