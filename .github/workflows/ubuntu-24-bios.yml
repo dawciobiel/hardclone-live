@@ -1,4 +1,5 @@
-name: 20:32 Build Ubuntu 24 BIOS
+name: 20:36 Build Ubuntu 24 BIOS
+
 on:
   workflow_dispatch:
 
@@ -44,7 +45,7 @@ jobs:
       - name: Bootstrap Ubuntu Noble system
         run: |
           # Use a more complete debootstrap
-          sudo debootstrap --arch=amd64 --variant=minbase --include=systemd-sysv,init,dbus,sudo,adduser,passwd,ifupdown,isc-dhcp-client,kmod,udev noble chroot-dir http://archive.ubuntu.com/ubuntu/
+          sudo debootstrap --arch=amd64 --variant=minbase --include=systemd-sysv,init,dbus,sudo,adduser,passwd,kmod,udev,netplan.io noble chroot-dir http://archive.ubuntu.com/ubuntu/
 
       - name: Configure system inside chroot  
         run: |
