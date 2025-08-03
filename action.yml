@@ -305,6 +305,7 @@ runs:
         echo "Creating initramfs..."
         KERNEL_VERSION=$(ls lib/modules/ | head -1)
         sudo chroot . mkinitfs -o /boot/initramfs-live "$KERNEL_VERSION"
+        sudo chmod 777 /boot/initramfs-live
         
         echo "Copying kernel..."
         sudo cp boot/vmlinuz-lts boot/vmlinuz-live 2>/dev/null || sudo cp boot/vmlinuz-* boot/vmlinuz-live
