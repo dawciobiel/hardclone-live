@@ -1,0 +1,342 @@
+name: Build Alpine Linux Live CLI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-alpine-live:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Alpine build environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          alpine-conf \
+          qemu-utils \
+          xorriso \
+          dosfstools \
+          mtools \
+          syslinux \
+          syslinux-utils \
+          isolinux \
+          wget \
+          curl
+
+    - name: Download Alpine Linux
+      run: |
+        ALPINE_VERSION="3.19"
+        ALPINE_ARCH="x86_64"
+        
+        # Download Alpine mini root filesystem
+        wget -O alpine-minirootfs.tar.gz \
+          "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/${ALPINE_ARCH}/alpine-minirootfs-${ALPINE_VERSION}.0-${ALPINE_ARCH}.tar.gz"
+        
+        # Download Alpine standard ISO for bootloader files
+        wget -O alpine-standard.iso \
+          "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/${ALPINE_ARCH}/alpine-standard-${ALPINE_VERSION}.0-${ALPINE_ARCH}.iso"
+
+    - name: Create Alpine Live system
+      run: |
+        # Create working directories
+        mkdir -p alpine-live/{boot,live,efi}
+        cd alpine-live
+        
+        # Extract Alpine mini root filesystem
+        sudo tar -xzf ../alpine-minirootfs.tar.gz
+        
+        # Mount Alpine ISO to extract bootloader files
+        sudo mkdir -p /mnt/alpine-iso
+        sudo mount -o loop ../alpine-standard.iso /mnt/alpine-iso
+        
+        # Copy EFI bootloader files
+        sudo cp -r /mnt/alpine-iso/efi ./
+        sudo cp -r /mnt/alpine-iso/boot ./
+        
+        # Unmount ISO
+        sudo umount /mnt/alpine-iso
+
+    - name: Configure Alpine system
+      run: |
+        cd alpine-live
+        
+        # Create chroot script
+        cat > setup_alpine.sh << 'EOF'
+        #!/bin/bash
+        
+        # Setup repositories
+        echo "http://dl-cdn.alpinelinux.org/alpine/v3.19/main" > /etc/apk/repositories
+        echo "http://dl-cdn.alpinelinux.org/alpine/v3.19/community" >> /etc/apk/repositories
+        echo "http://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories
+        
+        # Update package index
+        apk update
+        
+        # Install base system
+        apk add --no-cache \
+          alpine-base \
+          alpine-conf \
+          busybox \
+          openrc \
+          util-linux \
+          coreutils
+        
+        # Install Python 3.12 (3.15 not available yet, using latest stable)
+        apk add --no-cache \
+          python3 \
+          python3-dev \
+          py3-pip \
+          py3-setuptools \
+          py3-wheel \
+          build-base \
+          cmake \
+          qt6-qtbase-dev \
+          qt6-qtdeclarative-dev
+        
+        # Install PySide6 and psutil via pip (better compatibility)
+        pip3 install --break-system-packages PySide6 psutil
+        
+        # Install shell and editors
+        apk add --no-cache \
+          bash \
+          vim \
+          neovim \
+          nano \
+          mc
+        
+        # Install disk utilities
+        apk add --no-cache \
+          util-linux \
+          lsblk \
+          parted \
+          gdisk \
+          dosfstools \
+          e2fsprogs
+        
+        # Install compression tools
+        apk add --no-cache \
+          gzip \
+          zstd \
+          bzip2 \
+          xz \
+          tar \
+          unzip \
+          zip
+        
+        # Install additional utilities
+        apk add --no-cache \
+          gnupg \
+          diffutils \
+          coreutils \
+          findutils \
+          grep \
+          sed \
+          awk \
+          curl \
+          wget \
+          rsync \
+          openssh-client
+        
+        # Install EFI boot support
+        apk add --no-cache \
+          grub \
+          grub-efi \
+          efibootmgr \
+          syslinux
+        
+        # Setup user
+        adduser -D -s /bin/bash alpine
+        echo "alpine:alpine" | chpasswd
+        echo "root:alpine" | chpasswd
+        
+        # Enable services
+        rc-update add devfs sysinit
+        rc-update add dmesg sysinit
+        rc-update add mdev sysinit
+        rc-update add hwclock boot
+        rc-update add modules boot
+        rc-update add sysctl boot
+        rc-update add hostname boot
+        rc-update add bootmisc boot
+        rc-update add syslog boot
+        rc-update add networking default
+        rc-update add local default
+        rc-update add mount-ro shutdown
+        rc-update add killprocs shutdown
+        rc-update add savecache shutdown
+        
+        # Create live system configuration
+        cat > /etc/local.d/live-config.start << 'LIVEEOF'
+        #!/bin/sh
+        
+        # Auto-login on console
+        if [ ! -f /etc/inittab.orig ]; then
+          cp /etc/inittab /etc/inittab.orig
+          sed -i 's/tty1::respawn:\/sbin\/getty 38400 tty1/tty1::respawn:\/sbin\/getty -a alpine 38400 tty1/' /etc/inittab
+        fi
+        
+        # Setup temporary directories
+        mount -t tmpfs tmpfs /tmp
+        mount -t tmpfs tmpfs /var/tmp
+        
+        # Display welcome message
+        cat > /etc/motd << 'WELCOMEEOF'
+        
+        ╔════════════════════════════════════════════════════════════════╗
+        ║                    Alpine Linux Live CLI                       ║
+        ║                                                                ║
+        ║  Default user: alpine (password: alpine)                      ║
+        ║  Root password: alpine                                         ║
+        ║                                                                ║
+        ║  Included tools:                                               ║
+        ║  • Python 3.12 with PySide6, psutil                          ║
+        ║  • Editors: vim, nvim, nano, mc                               ║
+        ║  • Disk tools: dd, lsblk, parted, gdisk                      ║
+        ║  • Compression: gzip, zstd, bzip2, xz                        ║
+        ║  • Security: gpg, sha256sum, md5sum                           ║
+        ║                                                                ║
+        ╚════════════════════════════════════════════════════════════════╝
+        
+        WELCOMEEOF
+        LIVEEOF
+        
+        chmod +x /etc/local.d/live-config.start
+        rc-update add local default
+        
+        # Clean up
+        apk cache clean
+        rm -rf /var/cache/apk/*
+        rm -rf /tmp/*
+        
+        EOF
+        
+        # Make script executable and run it in chroot
+        chmod +x setup_alpine.sh
+        sudo cp setup_alpine.sh .
+        sudo chroot . /bin/sh setup_alpine.sh
+
+    - name: Create initramfs and kernel
+      run: |
+        cd alpine-live
+        
+        # Create initramfs
+        sudo chroot . mkinitfs -o /boot/initramfs-live $(ls lib/modules/)
+        
+        # Copy kernel
+        sudo cp boot/vmlinuz-* boot/vmlinuz-live
+
+    - name: Create SquashFS filesystem
+      run: |
+        cd alpine-live
+        
+        # Create SquashFS image (excluding boot directory)
+        sudo mksquashfs . ../alpine-live.squashfs \
+          -comp xz \
+          -e boot \
+          -e alpine-live.squashfs \
+          -e setup_alpine.sh
+
+    - name: Create bootable ISO with UEFI support
+      run: |
+        # Create ISO structure
+        mkdir -p iso-build/{boot,live,efi}
+        
+        # Copy bootloader files
+        cp -r alpine-live/boot iso-build/
+        cp -r alpine-live/efi iso-build/
+        
+        # Copy live system
+        cp alpine-live.squashfs iso-build/live/
+        
+        # Create GRUB configuration for UEFI
+        mkdir -p iso-build/efi/boot
+        cat > iso-build/efi/boot/grub.cfg << 'EOF'
+        set timeout=10
+        set default=0
+        
+        menuentry "Alpine Linux Live CLI" {
+            linux /boot/vmlinuz-live boot=live live-media-path=/live quiet
+            initrd /boot/initramfs-live
+        }
+        
+        menuentry "Alpine Linux Live CLI (Debug)" {
+            linux /boot/vmlinuz-live boot=live live-media-path=/live debug
+            initrd /boot/initramfs-live
+        }
+        EOF
+        
+        # Create legacy GRUB configuration
+        mkdir -p iso-build/boot/grub
+        cp iso-build/efi/boot/grub.cfg iso-build/boot/grub/
+        
+        # Create El Torito boot catalog and build ISO
+        xorriso -as mkisofs \
+          -iso-level 3 \
+          -full-iso9660-filenames \
+          -volid "ALPINE_LIVE_CLI" \
+          -appid "Alpine Linux Live CLI" \
+          -publisher "GitHub Actions Build" \
+          -preparer "alpine-live-builder" \
+          -eltorito-boot boot/grub/i386-pc/eltorito.img \
+          -no-emul-boot \
+          -boot-load-size 4 \
+          -boot-info-table \
+          -eltorito-alt-boot \
+          -efi-boot efi/boot/bootx64.efi \
+          -no-emul-boot \
+          -isohybrid-gpt-basdat \
+          -output alpine-live-cli.iso \
+          iso-build/
+
+    - name: Generate checksums
+      run: |
+        sha256sum alpine-live-cli.iso > alpine-live-cli.iso.sha256
+        md5sum alpine-live-cli.iso > alpine-live-cli.iso.md5
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: alpine-live-cli
+        path: |
+          alpine-live-cli.iso
+          alpine-live-cli.iso.sha256
+          alpine-live-cli.iso.md5
+        retention-days: 30
+
+    - name: Create Release (on tag)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          alpine-live-cli.iso
+          alpine-live-cli.iso.sha256
+          alpine-live-cli.iso.md5
+        body: |
+          ## Alpine Linux Live CLI
+          
+          Bootowalna dystrybucja Alpine Linux z narzędziami CLI
+          
+          ### Zawiera:
+          - Python 3.12 z PySide6, psutil
+          - Edytory: vim, neovim, nano, mc
+          - Narzędzia dyskowe: dd, lsblk, parted, gdisk
+          - Kompresja: gzip, zstd, bzip2, xz
+          - Bezpieczeństwo: gpg, sha256sum, md5sum
+          - Wsparcie UEFI i Legacy BIOS
+          
+          ### Użycie:
+          1. Pobierz plik ISO
+          2. Nagraj na USB/DVD
+          3. Bootuj z UEFI lub BIOS
+          4. Zaloguj się jako `alpine` (hasło: `alpine`)
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
