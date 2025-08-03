@@ -1,4 +1,4 @@
-name: Build 13:10 Ubuntu Noble CLI Live ISO based on base ubuntu
+name: Build Ubuntu Noble CLI Live ISO based on base ubuntu
 
 on:
   workflow_dispatch:
@@ -294,7 +294,7 @@ jobs:
           cp /usr/lib/syslinux/modules/bios/libgpl.c32 live-iso/isolinux/
           
           # Create isolinux config with better boot options
-          cat > live-iso/isolinux/isolinux.cfg << 'EOF'
+          cat > live-iso/isolinux/isolinux.cfg << EOF
 UI menu.c32
 PROMPT 0
 MENU TITLE Ubuntu 24.04 CLI Live
