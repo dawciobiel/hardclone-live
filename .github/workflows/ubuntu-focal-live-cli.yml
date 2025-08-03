@@ -1,10 +1,6 @@
-name: Build Ubuntu CLI Live ISO
+name: Build Ubuntu Focal CLI Live ISO
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -12,85 +8,69 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
       - name: Install dependencies
         run: |
-          sudo apt update
-          sudo apt install -y \
-            debootstrap xorriso squashfs-tools grub-pc-bin grub-efi-amd64-bin \
-            mtools dosfstools rsync
+          sudo apt-get update
+          sudo apt-get install -y \
+            debootstrap xorriso grub-pc-bin grub-efi-amd64-bin mtools squashfs-tools dosfstools
 
-      - name: Create working directories
+      - name: Create directory structure
         run: |
-          mkdir -p live-iso/{chroot,iso/{boot/grub,EFI/BOOT}}
+          mkdir -p live-iso/{chroot,iso/boot/grub}
 
-      - name: Bootstrap Ubuntu system
+      - name: Bootstrap Ubuntu CLI into chroot
         run: |
-          sudo debootstrap --arch=amd64 focal live-iso/chroot http://archive.ubuntu.com/ubuntu/
+          sudo debootstrap --variant=minbase focal live-iso/chroot http://archive.ubuntu.com/ubuntu/
 
-      - name: Set up basic configs
+      - name: Set up basic system configuration
         run: |
-          sudo cp /etc/resolv.conf live-iso/chroot/etc/
           echo "ubuntu-cli-live" | sudo tee live-iso/chroot/etc/hostname
-          sudo tee live-iso/chroot/etc/hosts > /dev/null <<EOF
-127.0.0.1 localhost
-127.0.1.1 ubuntu-cli-live
-EOF
+          sudo chroot live-iso/chroot apt-get update
+          sudo chroot live-iso/chroot apt-get install -y linux-image-generic grub-pc systemd-sysv sudo vim net-tools network-manager
 
-      - name: Mount filesystems
+      - name: Create a default user with sudo
         run: |
-          sudo mount --bind /dev live-iso/chroot/dev
-          sudo mount --bind /sys live-iso/chroot/sys
-          sudo mount --bind /proc live-iso/chroot/proc
+          echo "liveuser:x:1000:1000:Live User,,,:/home/liveuser:/bin/bash" | sudo tee -a live-iso/chroot/etc/passwd
+          echo "liveuser:x:1000:" | sudo tee -a live-iso/chroot/etc/group
+          sudo mkdir -p live-iso/chroot/home/liveuser
+          echo 'liveuser ALL=(ALL) NOPASSWD:ALL' | sudo tee live-iso/chroot/etc/sudoers.d/liveuser
+          sudo chroot live-iso/chroot chown -R 1000:1000 /home/liveuser
 
-      - name: Install packages in chroot
+      - name: Clean up chroot
         run: |
-          sudo chroot live-iso/chroot /bin/bash -c "
-            apt update &&
-            DEBIAN_FRONTEND=noninteractive apt install -y linux-image-generic sudo grub-pc-bin grub-efi-amd64-bin systemd-sysv net-tools curl &&
-            useradd -m -s /bin/bash ubuntu &&
-            echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
-          "
+          sudo chroot live-iso/chroot apt-get clean
+          sudo rm -rf live-iso/chroot/var/lib/apt/lists/*
 
-      - name: Unmount filesystems
-        run: |
-          sudo umount -lf live-iso/chroot/dev || true
-          sudo umount -lf live-iso/chroot/sys || true
-          sudo umount -lf live-iso/chroot/proc || true
-
-      - name: Create squashfs
+      - name: Create SquashFS filesystem
         run: |
           sudo mksquashfs live-iso/chroot live-iso/iso/filesystem.squashfs -e boot
 
       - name: Copy kernel and initrd
         run: |
-          sudo cp live-iso/chroot/boot/vmlinuz-* live-iso/iso/vmlinuz
-          sudo cp live-iso/chroot/boot/initrd.img-* live-iso/iso/initrd
+          mkdir -p live-iso/iso/boot
+          sudo cp "$(readlink -f /boot/vmlinuz)" live-iso/iso/boot/vmlinuz
+          sudo cp "$(readlink -f /boot/initrd.img)" live-iso/iso/boot/initrd
+          sudo chown -R $USER:$USER live-iso/iso/boot
+          chmod -R a+r live-iso/iso/boot
+
 
       - name: Create grub config
         run: |
-          cat <<EOF | sudo tee live-iso/iso/boot/grub/grub.cfg
-set default=0
-set timeout=5
+          sudo mkdir -p live-iso/iso/boot/grub
+          echo 'set default=0' | sudo tee live-iso/iso/boot/grub/grub.cfg
+          echo 'set timeout=5' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
+          echo '' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
+          echo 'menuentry "Ubuntu Focal CLI Live" {' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
+          echo '    linux /boot/vmlinuz boot=live quiet' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
+          echo '    initrd /boot/initrd' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
+          echo '}' | sudo tee -a live-iso/iso/boot/grub/grub.cfg
 
-menuentry "Ubuntu CLI Live" {
-    linux /vmlinuz boot=live quiet
-    initrd /initrd
-}
-EOF
-
-      - name: Create EFI bootloader
+      - name: Build ISO image
         run: |
-          grub-mkimage -o live-iso/iso/EFI/BOOT/BOOTx64.EFI -p /boot/grub -O x86_64-efi part_gpt part_msdos fat iso9660 configfile normal linux echo efi_gop efi_uga gfxterm search search_fs_uuid search_label search_fs_file terminal boot
-
-      - name: Create BIOS bootloader
-        run: |
-          grub-mkrescue -o ubuntu-cli-live.iso live-iso/iso --compress=xz
+          grub-mkrescue -o ubuntu-focal-cli-live.iso live-iso/iso --compress=xz
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ubuntu-cli-live.iso
-          path: ubuntu-cli-live.iso
+          name: ubuntu-focal-cli-live
+          path: ubuntu-focal-cli-live.iso
