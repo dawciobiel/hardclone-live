@@ -1,4 +1,4 @@
-name: Build Ubuntu Noble CLI Live ISO based on regular Ubuntu
+name: Build Ubuntu Noble CLI Live ISO based on base ubuntu
 
 on:
   workflow_dispatch:
@@ -75,9 +75,19 @@ jobs:
             ls -la /boot/
             ls -la /lib/modules/
             
+            # Install more essential packages for debugging
             apt-get install -y initramfs-tools busybox-initramfs
             apt-get install -y network-manager openssh-server
             apt-get install -y vim nano curl wget
+            apt-get install -y console-setup kbd
+            apt-get install -y rsyslog systemd-sysv
+            
+            # Install packages needed for proper boot
+            apt-get install -y plymouth plymouth-theme-ubuntu-text
+            apt-get install -y udev kmod
+            
+            # Ensure we have proper console drivers
+            apt-get install -y linux-modules-extra-generic
             
             # Configure system
             echo 'ubuntu-live' > /etc/hostname
@@ -90,24 +100,43 @@ jobs:
             usermod -aG sudo liveuser
             echo 'liveuser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
             
-            # Configure auto-login
+            # Configure auto-login with proper console setup
             mkdir -p /etc/systemd/system/getty@tty1.service.d
-            printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin liveuser --noclear %%I \$TERM\n' > /etc/systemd/system/getty@tty1.service.d/override.conf
+            cat > /etc/systemd/system/getty@tty1.service.d/override.conf << 'EOFCONF'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin liveuser --noclear %I \$TERM
+StandardInput=tty
+StandardOutput=tty
+EOFCONF
+            
+            # Ensure console is properly configured
+            echo 'ACTIVE_CONSOLES=\"/dev/tty[1-6]\"' >> /etc/default/console-setup
+            echo 'CHARMAP=\"UTF-8\"' >> /etc/default/console-setup
             
             # Configure live-boot
             mkdir -p /etc/live
             echo 'export LIVE_USERNAME=liveuser' >> /etc/live/boot.conf
             echo 'export LIVE_HOSTNAME=ubuntu-live' >> /etc/live/boot.conf
             
-            # Configure initramfs
+            # Configure initramfs with more modules
             echo 'BOOT=live' >> /etc/initramfs-tools/initramfs.conf
             echo 'MODULES=most' >> /etc/initramfs-tools/initramfs.conf
             echo 'COMPRESS=gzip' >> /etc/initramfs-tools/initramfs.conf
+            echo 'KEYMAP=y' >> /etc/initramfs-tools/initramfs.conf
             
             # Add required modules for live boot
             echo 'squashfs' >> /etc/initramfs-tools/modules  
             echo 'overlay' >> /etc/initramfs-tools/modules
             echo 'loop' >> /etc/initramfs-tools/modules
+            echo 'iso9660' >> /etc/initramfs-tools/modules
+            echo 'udf' >> /etc/initramfs-tools/modules
+            echo 'vfat' >> /etc/initramfs-tools/modules
+            echo 'ext4' >> /etc/initramfs-tools/modules
+            
+            # Add basic console and keyboard modules
+            echo 'atkbd' >> /etc/initramfs-tools/modules
+            echo 'i8042' >> /etc/initramfs-tools/modules
             
             # Generate initramfs for all kernels
             echo 'Generating initramfs...'
@@ -270,8 +299,38 @@ jobs:
           cp /usr/lib/syslinux/modules/bios/libcom32.c32 live-iso/isolinux/
           cp /usr/lib/syslinux/modules/bios/libgpl.c32 live-iso/isolinux/
           
-          # Create isolinux config
-          printf 'DEFAULT live\nLABEL live\n  menu label ^Try Ubuntu without installing\n  kernel /casper/vmlinuz\n  append initrd=/casper/initrd.lz boot=live quiet splash ---\n\nLABEL live-install\n  menu label ^Install Ubuntu\n  kernel /casper/vmlinuz\n  append initrd=/casper/initrd.lz boot=live only-ubiquity quiet splash ---\n\nLABEL check\n  menu label ^Check disc for defects\n  kernel /casper/vmlinuz\n  append initrd=/casper/initrd.lz boot=live media-check quiet splash ---\n\nLABEL memtest\n  menu label Test ^memory\n  kernel /install/memtest86+\n\nLABEL hd\n  menu label ^Boot from first hard disk\n  localboot 0x80\n' > live-iso/isolinux/isolinux.cfg
+          # Create isolinux config with better boot options
+          cat > live-iso/isolinux/isolinux.cfg << 'EOF'
+UI menu.c32
+PROMPT 0
+MENU TITLE Ubuntu 24.04 CLI Live
+TIMEOUT 300
+DEFAULT live
+
+LABEL live
+  MENU LABEL ^Try Ubuntu CLI Live
+  KERNEL /casper/vmlinuz
+  APPEND initrd=/casper/initrd.lz boot=live components quiet splash nomodeset vga=normal
+
+LABEL live-debug
+  MENU LABEL ^Try Ubuntu CLI Live (Debug Mode)
+  KERNEL /casper/vmlinuz
+  APPEND initrd=/casper/initrd.lz boot=live components debug=1 systemd.log_level=debug
+
+LABEL live-safe
+  MENU LABEL ^Try Ubuntu CLI Live (Safe Graphics)
+  KERNEL /casper/vmlinuz
+  APPEND initrd=/casper/initrd.lz boot=live components nomodeset vga=normal acpi=off noapic nosplash
+
+LABEL live-text
+  MENU LABEL ^Try Ubuntu CLI Live (Text Mode)
+  KERNEL /casper/vmlinuz
+  APPEND initrd=/casper/initrd.lz boot=live components systemd.unit=multi-user.target nomodeset text
+
+LABEL hd
+  MENU LABEL ^Boot from first hard disk
+  LOCALBOOT 0x80
+EOF
 
       - name: Create the ISO
         run: |
