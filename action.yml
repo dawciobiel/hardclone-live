@@ -1,455 +1,85 @@
-name: 'Build Alpine Linux Live CLI'
-description: 'Builds a bootable Alpine Linux Live CLI distribution with Python, editors, and system tools'
-author: 'Alpine Live Builder'
+name: 'Alpine Linux Live ISO Builder'
+description: 'Builds a bootable Alpine Linux CLI ISO with selected tools'
+author: 'Dawid Bielecki'
 
 inputs:
   alpine-version:
-    description: 'Alpine Linux version to use'
+    description: 'Alpine Linux version to use (e.g. 3.19)'
     required: false
     default: '3.19'
+
   upload-artifacts:
-    description: 'Whether to upload build artifacts'
-    required: false
-    default: 'true'
-  use-cache:
-    description: 'Whether to use caching for faster builds'
+    description: 'Upload the built ISO as a GitHub artifact (true/false)'
     required: false
     default: 'true'
 
-outputs:
-  iso-path:
-    description: 'Path to the generated ISO file'
-    value: ${{ steps.build-info.outputs.iso-path }}
-  iso-size:
-    description: 'Size of the generated ISO file'
-    value: ${{ steps.build-info.outputs.iso-size }}
+  use-cache:
+    description: 'Use cached Alpine minirootfs if available'
+    required: false
+    default: 'true'
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
-    - name: Set up build environment
+    - name: Set up environment
       shell: bash
       run: |
-        echo "Updating package index..."
-        sudo apt-get update
-        echo "Installing build dependencies..."
-        sudo apt-get install -y \
-          qemu-utils \
-          xorriso \
-          dosfstools \
-          mtools \
-          syslinux \
-          syslinux-utils \
-          isolinux \
-          wget \
-          curl \
-          squashfs-tools \
-          grub-efi-amd64-bin \
-          grub-pc-bin \
-          grub-common \
-          debootstrap
+        set -e
+        echo "Using Alpine version: ${{ inputs.alpine-version }}"
+        mkdir -p build
 
-    - name: Download Alpine Linux
+    - name: Download Alpine minirootfs
       shell: bash
       run: |
+        set -e
         ALPINE_VERSION="${{ inputs.alpine-version }}"
-        ALPINE_ARCH="x86_64"
-        
+        ROOTFS_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/alpine-minirootfs-${ALPINE_VERSION}.0-x86_64.tar.gz"
         if [ ! -f alpine-minirootfs.tar.gz ]; then
-          echo "Downloading Alpine Linux ${ALPINE_VERSION}..."
-          wget -O alpine-minirootfs.tar.gz \
-            "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/${ALPINE_ARCH}/alpine-minirootfs-${ALPINE_VERSION}.0-${ALPINE_ARCH}.tar.gz"
+          echo "Downloading Alpine minirootfs..."
+          curl -L "$ROOTFS_URL" -o alpine-minirootfs.tar.gz
         else
-          echo "Using cached Alpine Linux ${ALPINE_VERSION}"
+          echo "Using cached minirootfs..."
         fi
-        
-        echo "Verifying Alpine minirootfs..."
-        ls -lh alpine-minirootfs.tar.gz
 
-    - name: Create Alpine Live system
+    - name: Extract and configure minirootfs
       shell: bash
       run: |
-        echo "Creating Alpine Live system structure..."
-        mkdir -p alpine-live
-        cd alpine-live
-        
-        echo "Extracting Alpine mini root filesystem..."
-        sudo tar -xzf ../alpine-minirootfs.tar.gz
-        
-        echo "Setting up chroot environment..."
-        sudo mount --bind /dev dev/
-        sudo mount --bind /proc proc/
-        sudo mount --bind /sys sys/
-        sudo cp /etc/resolv.conf etc/resolv.conf
+        mkdir -p rootfs
+        sudo tar -xzf alpine-minirootfs.tar.gz -C rootfs
+        sudo cp /etc/resolv.conf rootfs/etc/
+        sudo chroot rootfs apk add --no-cache bash shadow
+        sudo chroot rootfs chsh -s /bin/bash
+        echo "Default shell changed to bash"
+        sudo chroot rootfs adduser -D alpine
+        echo "alpine:alpine" | sudo chroot rootfs chpasswd
+        sudo chroot rootfs adduser alpine wheel
 
-    - name: Configure Alpine system - Base packages
+    - name: Add CLI tools
       shell: bash
       run: |
-        cd alpine-live
-        echo "Installing base system packages..."
-        
-        sudo chroot . /bin/sh -c '
-        echo "Setting up repositories..."
-        echo "http://dl-cdn.alpinelinux.org/alpine/v${{ inputs.alpine-version }}/main" > /etc/apk/repositories
-        echo "http://dl-cdn.alpinelinux.org/alpine/v${{ inputs.alpine-version }}/community" >> /etc/apk/repositories
-        echo "http://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories
-        
-        echo "Updating package index..."
-        apk update
-        
-        echo "Installing base system..."
-        apk add --no-cache \
-          alpine-base \
-          alpine-conf \
-          busybox \
-          openrc \
-          util-linux \
-          coreutils \
-          linux-lts \
-          linux-firmware
-        '
+        sudo chroot rootfs apk add --no-cache \
+          vim neovim nano mc \
+          parted e2fsprogs util-linux \
+          gdisk dosfstools \
+          gzip zstd bzip2 xz \
+          gnupg openssl \
+          python3 py3-psutil \
+          coreutils
 
-    - name: Configure Alpine system - Python and development tools
+    - name: Create ISO image
       shell: bash
       run: |
-        cd alpine-live
-        echo "Installing Python and development tools..."
-        
-        sudo chroot . /bin/sh -c '
-        echo "Installing Python 3.12 and development environment..."
-        apk add --no-cache \
-          python3 \
-          python3-dev \
-          py3-pip \
-          py3-setuptools \
-          py3-wheel \
-          py3-psutil \
-          build-base \
-          cmake \
-          gcc \
-          musl-dev \
-          linux-headers \
-          pkgconfig \
-          git \
-          qt6-qtbase \
-          qt6-qtbase-dev \
-          qt6-qtdeclarative \
-          qt6-qtdeclarative-dev \
-          qt6-qttools-dev \
-          mesa-dev \
-          libxkbcommon-dev \
-          libx11-dev \
-          libxext-dev \
-          libxrender-dev \
-          libxrandr-dev \
-          libxinerama-dev \
-          libxcursor-dev \
-          libxi-dev \
-          wayland-dev \
-          wayland-protocols \
-          libdrm-dev \
-          eudev-dev
-        '
+        echo "Creating Alpine Live ISO..."
+        ISO_NAME="alpine-live-cli.iso"
+        mkisofs -o $ISO_NAME -b boot/syslinux/isolinux.bin \
+          -c boot/syslinux/boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table \
+          -J -R -V "ALPINE_LIVE_CLI" rootfs
+        echo "ISO created: $ISO_NAME"
+        sha256sum $ISO_NAME > $ISO_NAME.sha256
+        md5sum $ISO_NAME > $ISO_NAME.md5
 
-    - name: Configure Alpine system - Editors and CLI tools
-      shell: bash
-      run: |
-        cd alpine-live
-        echo "Installing editors and CLI tools..."
-        
-        sudo chroot . /bin/sh -c '
-        echo "Installing shell and editors..."
-        apk add --no-cache \
-          bash \
-          vim \
-          neovim \
-          nano \
-          mc
-        
-        echo "Installing disk utilities..."
-        apk add --no-cache \
-          util-linux \
-          parted \
-          gdisk \
-          dosfstools \
-          e2fsprogs \
-          ntfs-3g
-        
-        echo "Installing compression tools..."
-        apk add --no-cache \
-          gzip \
-          zstd \
-          bzip2 \
-          xz \
-          tar \
-          unzip \
-          zip
-        
-        echo "Installing additional utilities..."
-        apk add --no-cache \
-          gnupg \
-          diffutils \
-          coreutils \
-          findutils \
-          grep \
-          sed \
-          gawk \
-          curl \
-          wget \
-          rsync \
-          openssh-client
-        '
-
-    - name: Configure Alpine system - Bootloader and Python packages
-      shell: bash
-      run: |
-        cd alpine-live
-        echo "Installing bootloader support..."
-        
-        sudo chroot . /bin/sh -c '
-        echo "Installing bootloader support..."
-        apk add --no-cache \
-          grub \
-          grub-efi \
-          efibootmgr \
-          syslinux
-        '
-        
-        echo "Attempting to install PySide6..."
-        sudo chroot . /bin/sh -c '
-        pip3 install --break-system-packages --no-cache-dir PySide6 || echo "PySide6 installation failed"
-        python3 -c "import psutil; print(\"psutil available\")" || echo "psutil test failed"
-        python3 -c "import PySide6.QtCore; print(\"PySide6 available\")" || echo "PySide6 not available"
-        '
-
-    - name: Configure Alpine system - Users and services
-      shell: bash
-      run: |
-        cd alpine-live
-        echo "Setting up users and services..."
-        
-        sudo chroot . /bin/sh -c '
-        echo "Setting up users..."
-        adduser -D -s /bin/bash alpine
-        echo "alpine:alpine" | chpasswd
-        echo "root:alpine" | chpasswd
-        
-        echo "Enabling essential services..."
-        rc-update add devfs sysinit
-        rc-update add dmesg sysinit
-        rc-update add mdev sysinit
-        rc-update add hwclock boot
-        rc-update add modules boot
-        rc-update add sysctl boot
-        rc-update add hostname boot
-        rc-update add bootmisc boot
-        rc-update add syslog boot
-        rc-update add networking default
-        rc-update add local default
-        rc-update add mount-ro shutdown
-        rc-update add killprocs shutdown
-        rc-update add savecache shutdown
-        '
-
-    - name: Configure Alpine system - Live system configuration
-      shell: bash
-      run: |
-        cd alpine-live
-        echo "Creating live system configuration..."
-        
-        sudo chroot . /bin/sh -c '
-        echo "Creating live boot configuration..."
-        cat > /etc/local.d/live-config.start << "EOF"
-        #!/bin/sh
-        
-        # Auto-login on console
-        if [ ! -f /etc/inittab.orig ]; then
-          cp /etc/inittab /etc/inittab.orig
-          sed -i "s/tty1::respawn:\/sbin\/getty 38400 tty1/tty1::respawn:\/sbin\/getty -a alpine 38400 tty1/" /etc/inittab
-        fi
-        
-        # Setup temporary directories
-        mount -t tmpfs tmpfs /tmp
-        mount -t tmpfs tmpfs /var/tmp
-        EOF
-        
-        echo "Creating welcome message..."
-        cat > /etc/motd << "EOF2"
-        
-        ╔════════════════════════════════════════════════════════════════╗
-        ║                    Alpine Linux Live CLI                       ║
-        ║                                                                ║
-        ║  Default user: alpine (password: alpine)                      ║
-        ║  Root password: alpine                                         ║
-        ║                                                                ║
-        ║  Included tools:                                               ║
-        ║  • Python 3.12 with psutil (PySide6 optional)                ║
-        ║  • Editors: vim, nvim, nano, mc                               ║
-        ║  • Disk tools: dd, lsblk, parted, gdisk                      ║
-        ║  • Compression: gzip, zstd, bzip2, xz                        ║
-        ║  • Security: gpg, sha256sum, md5sum                           ║
-        ║                                                                ║
-        ╚════════════════════════════════════════════════════════════════╝
-        
-        EOF2
-        
-        chmod +x /etc/local.d/live-config.start
-        rc-update add local default
-        
-        echo "Cleaning up..."
-        apk cache clean
-        rm -rf /var/cache/apk/*
-        rm -rf /tmp/*
-        '
-        
-        echo "Cleaning up chroot mounts..."
-        sudo umount dev/ proc/ sys/ || true
-
-    - name: Create initramfs and extract kernel
-      shell: bash
-      run: |
-        cd alpine-live
-        echo "Creating initramfs and extracting kernel..."
-        
-        sudo mount --bind /dev dev/
-        sudo mount --bind /proc proc/
-        sudo mount --bind /sys sys/
-        
-        echo "Creating initramfs..."
-        KERNEL_VERSION=$(ls lib/modules/ | head -1)
-        sudo chroot . mkinitfs -o /boot/initramfs-live "$KERNEL_VERSION"
-        
-        echo "Copying kernel..."
-        sudo cp boot/vmlinuz-lts boot/vmlinuz-live 2>/dev/null || sudo cp boot/vmlinuz-* boot/vmlinuz-live
-        
-        echo "Copying boot files to host with proper permissions..."
-        sudo cp boot/vmlinuz-live ../
-        sudo cp boot/initramfs-live ../
-        
-        # FIX: Change ownership to current user
-        sudo chown $USER:$USER ../vmlinuz-live
-        sudo chown $USER:$USER ../initramfs-live
-        
-        echo "Cleaning up mounts..."
-        sudo umount dev/ proc/ sys/ || true
-
-    - name: Create SquashFS filesystem
-      shell: bash
-      run: |
-        echo "Creating SquashFS filesystem..."
-        sudo mksquashfs alpine-live alpine-live.squashfs \
-          -comp xz \
-          -e boot/vmlinuz-live \
-          -e boot/initramfs-live
-        
-        # FIX: Change ownership of SquashFS file
-        sudo chown $USER:$USER alpine-live.squashfs
-        
-        echo "SquashFS created: $(ls -lh alpine-live.squashfs)"
-
-    - name: Create bootable ISO with UEFI support
-      shell: bash
-      run: |
-        echo "Creating bootable ISO structure..."
-        mkdir -p iso-build/{boot/grub,efi/boot,live}
-        
-        echo "Copying kernel and initramfs..."
-        # FIX: Files now have correct permissions
-        cp vmlinuz-live iso-build/boot/
-        cp initramfs-live iso-build/boot/
-        
-        echo "Copying live system..."
-        cp alpine-live.squashfs iso-build/live/
-        
-        echo "Creating GRUB configuration..."
-        cat > iso-build/efi/boot/grub.cfg << 'GRUBEOF'
-        set timeout=10
-        set default=0
-        
-        menuentry "Alpine Linux Live CLI" {
-            linux /boot/vmlinuz-live boot=live live-media-path=/live quiet
-            initrd /boot/initramfs-live
-        }
-        
-        menuentry "Alpine Linux Live CLI (Debug)" {
-            linux /boot/vmlinuz-live boot=live live-media-path=/live debug
-            initrd /boot/initramfs-live
-        }
-        GRUBEOF
-        
-        echo "Creating legacy GRUB configuration..."
-        cp iso-build/efi/boot/grub.cfg iso-build/boot/grub/
-        
-        echo "Creating GRUB EFI bootloader..."
-        grub-mkimage -o iso-build/efi/boot/bootx64.efi -p /efi/boot -O x86_64-efi \
-          part_gpt part_msdos fat ext2 iso9660 chain boot configfile normal \
-          minicmd search search_fs_file search_fs_uuid search_label linux \
-          gfxterm gettext echo true test regexp probe
-        
-        echo "Creating legacy GRUB bootloader..."
-        mkdir -p iso-build/boot/grub/i386-pc
-        grub-mkimage -o iso-build/boot/grub/i386-pc/core.img -p /boot/grub -O i386-pc \
-          biosdisk part_msdos part_gpt fat ext2 iso9660 chain boot configfile normal \
-          minicmd search search_fs_file search_fs_uuid search_label linux echo true test regexp probe
-        
-        cat /usr/lib/grub/i386-pc/cdboot.img iso-build/boot/grub/i386-pc/core.img > iso-build/boot/grub/i386-pc/eltorito.img
-        
-        echo "Creating EFI boot image..."
-        # Create EFI boot image
-        dd if=/dev/zero of=efiboot.img bs=1M count=10
-        mkfs.fat -F16 efiboot.img
-        mkdir -p efi-mount
-        sudo mount -o loop efiboot.img efi-mount
-        sudo mkdir -p efi-mount/efi/boot
-        sudo cp iso-build/efi/boot/bootx64.efi efi-mount/efi/boot/
-        sudo cp iso-build/efi/boot/grub.cfg efi-mount/efi/boot/
-        sudo umount efi-mount
-        rmdir efi-mount
-        
-        echo "Building hybrid ISO with UEFI and BIOS support..."
-        xorriso -as mkisofs \
-          -iso-level 3 \
-          -full-iso9660-filenames \
-          -volid "ALPINE_LIVE_CLI" \
-          -appid "Alpine Linux Live CLI" \
-          -publisher "GitHub Actions Build" \
-          -preparer "alpine-live-builder" \
-          -eltorito-boot boot/grub/i386-pc/eltorito.img \
-          -no-emul-boot \
-          -boot-load-size 4 \
-          -boot-info-table \
-          -eltorito-alt-boot \
-          -e efiboot.img \
-          -no-emul-boot \
-          -isohybrid-gpt-basdat \
-          -output alpine-live-cli.iso \
-          iso-build/ \
-          efiboot.img
-        
-        echo "ISO created successfully!"
-
-    - name: Generate checksums
-      shell: bash
-      run: |
-        echo "Generating checksums..."
-        sha256sum alpine-live-cli.iso > alpine-live-cli.iso.sha256
-        md5sum alpine-live-cli.iso > alpine-live-cli.iso.md5
-        
-        echo "Build completed successfully!"
-        echo "Files created:"
-        ls -lh alpine-live-cli.iso*
-
-    - name: Set build info
-      shell: bash
-      id: build-info
-      run: |
-        ISO_PATH=$(pwd)/alpine-live-cli.iso
-        ISO_SIZE=$(stat -c%s alpine-live-cli.iso)
-        echo "iso-path=$ISO_PATH" >> $GITHUB_OUTPUT
-        echo "iso-size=$ISO_SIZE" >> $GITHUB_OUTPUT
-
-    - name: Upload artifacts
-      if: inputs.upload-artifacts == 'true'
+    - name: Upload ISO as artifact
+      if: ${{ inputs.upload-artifacts == 'true' }}
       uses: actions/upload-artifact@v4
       with:
         name: alpine-live-cli
@@ -457,4 +87,3 @@ runs:
           alpine-live-cli.iso
           alpine-live-cli.iso.sha256
           alpine-live-cli.iso.md5
-        retention-days: 30
