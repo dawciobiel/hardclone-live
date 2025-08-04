@@ -1,107 +1,95 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
+set -e
 
 ALPINE_VERSION="${1:-3.18}"
 USE_CACHE="${2:-true}"
 BUILD_ISO="${3:-true}"
 
-ROOT_DIR="$(pwd)"
-WORKDIR="$ROOT_DIR/alpine-$ALPINE_VERSION"
-ROOTFS_DIR="$WORKDIR/rootfs"
-ISO_DIR="$WORKDIR/iso"
-ISO_OUTPUT="$ROOT_DIR/alpine-$ALPINE_VERSION-custom.iso"
-
-echo "📦 Alpine version: $ALPINE_VERSION"
-echo "🗃️ Use cache: $USE_CACHE"
-echo "📀 Build ISO: $BUILD_ISO"
+echo "📦 Alpine version: ${ALPINE_VERSION}"
+echo "🗃️ Use cache: ${USE_CACHE}"
+echo "📀 Build ISO: ${BUILD_ISO}"
 
 echo "🔍 Checking required tools..."
-for tool in wget 7z xorriso tar bash; do
-    if command -v "$tool" >/dev/null 2>&1; then
-        echo "✅ $tool found: $($tool --version 2>/dev/null | head -n 1 || echo OK)"
-    else
-        echo "❌ $tool is not installed. Exiting."
+
+check_tool() {
+    local tool="$1"
+    local version_cmd="$2"
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "❌ $tool not found!"
         exit 1
+    else
+        local version_output
+        version_output=$(eval "$version_cmd" 2>/dev/null || echo "OK")
+        echo "✅ $tool found: $version_output"
     fi
-done
+}
 
-mkdir -p "$ROOTFS_DIR" "$ISO_DIR/boot" "$ISO_DIR/syslinux"
+check_tool wget "wget --version | head -n1"
+check_tool 7z "7z | head -n2 | tail -n1"
+check_tool xorriso "xorriso -version | head -n1"
+check_tool tar "tar --version | head -n1"
+check_tool bash "bash --version | head -n1"
 
-MINIROOTFS="alpine-minirootfs-$ALPINE_VERSION-x86_64.tar.gz"
-MINIROOTFS_URL="https://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/releases/x86_64/$MINIROOTFS"
+WORKDIR="$(pwd)"
+OUTDIR="${WORKDIR}/alpine-${ALPINE_VERSION}"
+CACHEDIR="${WORKDIR}/.cache"
+ROOTFS="${OUTDIR}/rootfs"
+ISO_DIR="${OUTDIR}/iso"
+ISO_FILE="${WORKDIR}/alpine-${ALPINE_VERSION}-custom.iso"
+MIRROR="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64"
 
-if [[ "$USE_CACHE" != "true" || ! -f "$MINIROOTFS" ]]; then
-    echo "📥 Downloading apk.static and base packages..."
-    wget -q --show-progress "$MINIROOTFS_URL" -O "$MINIROOTFS"
-else
-    echo "💾 Using cached minirootfs: $MINIROOTFS"
+mkdir -p "${ROOTFS}"
+mkdir -p "${CACHEDIR}"
+
+echo "📥 Downloading apk.static and base packages..."
+
+APK_TOOLS_URL="${MIRROR}/apk-tools-static-2.12.10-r1.apk"
+BASE_TAR_URL="${MIRROR}/alpine-minirootfs-${ALPINE_VERSION}.0-x86_64.tar.gz"
+
+echo "🔗 ${APK_TOOLS_URL}"
+echo "🔗 ${BASE_TAR_URL}"
+
+cd "${CACHEDIR}"
+wget -N "${APK_TOOLS_URL}" || { echo "❌ Failed to download apk-tools"; exit 1; }
+wget -N "${BASE_TAR_URL}" || { echo "❌ Failed to download base rootfs"; exit 1; }
+
+cd "${ROOTFS}"
+tar -xzf "${CACHEDIR}/alpine-minirootfs-${ALPINE_VERSION}.0-x86_64.tar.gz"
+
+cd "${WORKDIR}"
+echo "✅ Root filesystem prepared at: ${ROOTFS}"
+
+if [ "${BUILD_ISO}" = "true" ]; then
+    echo "🚧 Preparing ISO structure..."
+
+    mkdir -p "${ISO_DIR}/boot"
+
+    echo "📥 Downloading kernel and initrd..."
+    wget -N "${MIRROR}/vmlinuz" -O "${ISO_DIR}/boot/vmlinuz" || echo "⚠️ Warning: Kernel file not found at ${MIRROR}/vmlinuz"
+    wget -N "${MIRROR}/initramfs" -O "${ISO_DIR}/boot/initramfs" || echo "⚠️ Warning: Initrd file not found at ${MIRROR}/initramfs"
+
+    echo "🛠️ Creating ISO image..."
+    xorriso \
+        -as mkisofs \
+        -iso-level 3 \
+        -full-iso9660-filenames \
+        -volid "ALPINE_LIVE" \
+        -output "${ISO_FILE}" \
+        -eltorito-boot boot/vmlinuz \
+        -eltorito-catalog boot/boot.cat \
+        -no-emul-boot \
+        -boot-load-size 4 \
+        -boot-info-table \
+        -eltorito-alt-boot \
+        -e boot/initramfs \
+        -no-emul-boot \
+        -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+        -c boot/boot.cat \
+        -b boot/syslinux.bin \
+        -no-emul-boot \
+        -boot-load-size 4 \
+        -boot-info-table \
+        "${ISO_DIR}" || echo "⚠️ Failed to create ISO image!"
+
+    echo "✅ ISO image created at: ${ISO_FILE}"
 fi
-
-echo "✅ Download completed. Extracting..."
-tar -xzf "$MINIROOTFS" -C "$ROOTFS_DIR"
-echo "✅ Root filesystem prepared at: $ROOTFS_DIR"
-
-echo "🚧 Preparing ISO structure..."
-
-# Copy rootfs content
-cp -a "$ROOTFS_DIR/." "$ISO_DIR/"
-
-echo "📥 Downloading kernel and initrd..."
-KERNEL_NAME="vmlinuz-virt"
-INITRD_NAME="initramfs-virt"
-
-KERNEL_URL="https://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/releases/x86_64/$KERNEL_NAME"
-INITRD_URL="https://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/releases/x86_64/$INITRD_NAME"
-
-wget -q --show-progress "$KERNEL_URL" -O "$ISO_DIR/boot/$KERNEL_NAME" || echo "⚠️ Warning: Kernel file not found at $KERNEL_URL"
-wget -q --show-progress "$INITRD_URL" -O "$ISO_DIR/boot/$INITRD_NAME" || echo "⚠️ Warning: Initrd file not found at $INITRD_URL"
-
-echo "📥 Downloading syslinux bootloader..."
-SYSLINUX_PKG="syslinux-6.04_pre1-r4.apk"
-wget -q "https://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/main/x86_64/$SYSLINUX_PKG"
-mkdir -p syslinux-extract
-7z x "$SYSLINUX_PKG" -osyslinux-extract > /dev/null
-7z x "syslinux-extract/data.tar.gz" -osyslinux-extract > /dev/null
-
-cp syslinux-extract/usr/share/syslinux/isolinux.bin "$ISO_DIR/syslinux/"
-cp syslinux-extract/usr/share/syslinux/ldlinux.c32 "$ISO_DIR/syslinux/"
-cp syslinux-extract/usr/share/syslinux/libcom32.c32 "$ISO_DIR/syslinux/"
-cp syslinux-extract/usr/share/syslinux/libutil.c32 "$ISO_DIR/syslinux/"
-cp syslinux-extract/usr/share/syslinux/menu.c32 "$ISO_DIR/syslinux/"
-cp syslinux-extract/usr/share/syslinux/vesamenu.c32 "$ISO_DIR/syslinux/"
-
-cp syslinux-extract/usr/lib/syslinux/isohdpfx.bin "$ISO_DIR/"
-
-cat > "$ISO_DIR/syslinux/isolinux.cfg" <<EOF
-UI vesamenu.c32
-PROMPT 0
-TIMEOUT 50
-DEFAULT alpine
-
-LABEL alpine
-  KERNEL /boot/$KERNEL_NAME
-  INITRD /boot/$INITRD_NAME
-  APPEND initrd=/boot/$INITRD_NAME console=ttyS0
-EOF
-
-echo "🛠️ Creating ISO image..."
-cd "$ISO_DIR"
-
-xorriso \
-  -as mkisofs \
-  -o "$ISO_OUTPUT" \
-  -isohybrid-mbr ./isohdpfx.bin \
-  -c syslinux/boot.cat \
-  -b syslinux/isolinux.bin \
-  -no-emul-boot \
-  -boot-load-size 4 \
-  -boot-info-table \
-  -V "ALPINE_LIVE" \
-  -eltorito-alt-boot \
-  -e boot/$INITRD_NAME \
-  -no-emul-boot \
-  -isohybrid-apm-hfsplus \
-  -isohybrid-gpt-basdat \
-  .
-
-echo "✅ ISO image created at $ISO_OUTPUT"
