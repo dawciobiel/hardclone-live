@@ -15,7 +15,7 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - run: chmod +x ./scripts/entrypoint.sh
+    - run: chmod +x ./entrypoint.sh
       shell: bash
-    - run: ./scripts/entrypoint.sh "${{ inputs.alpine-version }}" "${{ inputs.use-cache }}" "${{ inputs.build-iso }}"
+    - run: ./entrypoint.sh "${{ inputs.alpine-version }}" "${{ inputs.use-cache }}" "${{ inputs.build-iso }}"
       shell: bash
