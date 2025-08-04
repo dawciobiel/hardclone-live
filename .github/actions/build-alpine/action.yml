@@ -15,7 +15,15 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - run: |
+        echo "Current directory:"
+        pwd
+        echo "Contents:"
+        ls -lah
+      shell: bash
+
     - run: chmod +x ./entrypoint.sh
       shell: bash
+
     - run: ./entrypoint.sh "${{ inputs.alpine-version }}" "${{ inputs.use-cache }}" "${{ inputs.build-iso }}"
       shell: bash
