@@ -24,10 +24,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up dependencies
+      - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y curl xorriso squashfs-tools proot
 
-      - name: Build ISO
+      - name: Run build script
         uses: ./github/actions/build-alpine
         with:
           alpine-version: ${{ inputs.alpine-version }}
