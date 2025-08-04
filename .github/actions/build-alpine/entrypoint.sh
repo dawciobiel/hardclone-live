@@ -74,12 +74,13 @@ LABEL alpine
   APPEND initrd=/boot/initrd.gz init=/init
 EOF
 
-# Step 7: Prepare kernel and initrd
-echo "📦 Installing kernel and initrd..."
-proot -R "$ROOTFS_DIR" apk add linux-lts mkinitfs
-cp "$ROOTFS_DIR"/boot/vmlinuz-lts "$ISODIR/boot/vmlinuz"
-proot -R "$ROOTFS_DIR" mkinitfs
-cp "$ROOTFS_DIR"/boot/initramfs-lts "$ISODIR/boot/initrd.gz"
+# Step 7: Download prebuilt kernel and initrd from Alpine
+echo "📥 Downloading kernel and initrd from Alpine repo..."
+
+KERNEL_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64"
+wget -q --show-progress "$KERNEL_URL"/vmlinuz-lts -O "$ISODIR/boot/vmlinuz"
+wget -q --show-progress "$KERNEL_URL"/initramfs-lts -O "$ISODIR/boot/initrd.gz"
+
 
 # Step 8: Copy syslinux binaries
 cp /usr/lib/ISOLINUX/isolinux.bin "$ISODIR/boot/syslinux/"
