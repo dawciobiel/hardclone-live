@@ -14,15 +14,6 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # Cache for APT packages
-    - name: Cache APT packages
-      uses: actions/cache@v4
-      with:
-        path: /var/cache/apt
-        key: apt-cache-${{ runner.os }}-v1
-        restore-keys: |
-          apt-cache-${{ runner.os }}-
-
     # Cache for Alpine minirootfs
     - name: Cache Alpine minirootfs
       uses: actions/cache@v4
@@ -32,17 +23,6 @@ jobs:
         key: alpine-minirootfs-${{ inputs.alpine-version || '3.19' }}-x86_64
         restore-keys: |
           alpine-minirootfs-${{ inputs.alpine-version || '3.19' }}-
-
-    # Cache for GRUB files
-    - name: Cache GRUB files
-      uses: actions/cache@v4
-      with:
-        path: |
-          /usr/lib/grub/
-          /usr/share/grub/
-        key: grub-cache-${{ runner.os }}-v1
-        restore-keys: |
-          grub-cache-${{ runner.os }}-
 
     - name: Build Alpine Linux Live CLI
       uses: ./
