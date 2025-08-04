@@ -1,97 +1,90 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 ALPINE_VERSION="$1"
 USE_CACHE="$2"
 BUILD_ISO="$3"
+BASE_DIR="$(pwd)/alpine-${ALPINE_VERSION}"
+ROOTFS_DIR="${BASE_DIR}/rootfs"
+ISO_DIR="${BASE_DIR}/iso"
+OUTPUT_ISO="alpine-${ALPINE_VERSION}-custom.iso"
 
-echo "📦 Alpine version: $ALPINE_VERSION"
-echo "🗃️ Use cache: $USE_CACHE"
-echo "📀 Build ISO: $BUILD_ISO"
+echo "📦 Alpine version: ${ALPINE_VERSION}"
+echo "🗃️ Use cache: ${USE_CACHE}"
+echo "📀 Build ISO: ${BUILD_ISO}"
 
+# --- Checking required tools ---
 echo "🔍 Checking required tools..."
 
-# Lista wymaganych programów
-REQUIRED_CMDS=("wget" "7z" "tar" "bash")
-MISSING_CMDS=()
-
-# Sprawdzamy obecność wymaganych narzędzi
-for cmd in "${REQUIRED_CMDS[@]}"; do
-  if ! command -v "$cmd" >/dev/null 2>&1; then
-    MISSING_CMDS+=("$cmd")
+check_tool() {
+  TOOL="$1"
+  if command -v "$TOOL" > /dev/null 2>&1; then
+    echo "✅ $TOOL found: $($TOOL --version | head -n1)"
   else
-    VERSION=$($cmd --version 2>&1 | head -n1)
-    echo "✅ $cmd found: $VERSION"
+    echo "❌ $TOOL NOT found!"
+    MISSING=true
   fi
-done
+}
 
-# Sprawdzamy, czy jest mkisofs lub xorriso do tworzenia ISO
-if command -v mkisofs >/dev/null 2>&1; then
-  ISO_MAKER="mkisofs"
-elif command -v xorriso >/dev/null 2>&1; then
-  ISO_MAKER="xorriso"
-else
-  MISSING_CMDS+=("mkisofs or xorriso")
-fi
+MISSING=false
+check_tool wget
+check_tool 7z
+check_tool xorriso
+check_tool tar
+check_tool bash
 
-if [ ${#MISSING_CMDS[@]} -ne 0 ]; then
-  echo "❌ Missing required tools: ${MISSING_CMDS[*]}"
+if [ "$MISSING" = true ]; then
   echo "❌ One or more required tools are missing. Exiting."
   exit 1
 fi
 
-echo "✅ ISO maker found: $ISO_MAKER"
+# --- Download and extract rootfs ---
+if [ "$USE_CACHE" != "true" ] || [ ! -d "$ROOTFS_DIR" ]; then
+  echo "📥 Downloading apk.static and base packages..."
+  mkdir -p "$ROOTFS_DIR"
+  cd "$BASE_DIR"
+  wget -q "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/alpine-minirootfs-${ALPINE_VERSION}.0-x86_64.tar.gz"
+  echo "✅ Download completed. Extracting..."
+  tar -xzf "alpine-minirootfs-${ALPINE_VERSION}.0-x86_64.tar.gz" -C "$ROOTFS_DIR"
+  echo "✅ Root filesystem prepared at: $ROOTFS_DIR"
+  cd -
+else
+  echo "✅ Using cached rootfs at: $ROOTFS_DIR"
+fi
 
-WORKDIR="$(pwd)/alpine-${ALPINE_VERSION}"
-CACHEDIR="$WORKDIR/cache"
-ISODIR="$WORKDIR/iso"
-ROOTFS_DIR="$WORKDIR/rootfs"
+# --- Prepare ISO structure ---
+echo "🚧 Preparing ISO structure..."
+mkdir -p "$ISO_DIR/boot"
 
-MINIROOTFS_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/alpine-minirootfs-${ALPINE_VERSION}.0-x86_64.tar.gz"
+KERNEL_FILE="vmlinuz"
+INITRD_FILE="initramfs"
 
-mkdir -p "$CACHEDIR" "$ISODIR" "$ROOTFS_DIR"
+echo "📥 Downloading kernel and initrd..."
+KERNEL_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/${KERNEL_FILE}"
+INITRD_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/${INITRD_FILE}"
 
-cd "$CACHEDIR"
+wget -q -O "$ISO_DIR/boot/$KERNEL_FILE" "$KERNEL_URL" || echo "⚠️ Warning: Kernel file not found at $KERNEL_URL"
+wget -q -O "$ISO_DIR/boot/$INITRD_FILE" "$INITRD_URL" || echo "⚠️ Warning: Initrd file not found at $INITRD_URL"
 
-echo "📥 Downloading Alpine minirootfs..."
-wget -N "$MINIROOTFS_URL"
-
-echo "✅ Download completed. Extracting..."
-
-tar -xzf "alpine-minirootfs-${ALPINE_VERSION}.0-x86_64.tar.gz" -C "$ROOTFS_DIR"
-
-echo "✅ Root filesystem prepared at: $ROOTFS_DIR"
-
-# Dalsza logika budowania ISO - jeśli build-iso jest true
-if [ "$BUILD_ISO" == "true" ]; then
-  echo "🚧 Preparing ISO structure..."
-
-  # Przykładowa minimalna struktura do ISO
-  mkdir -p "$ISODIR/boot"
-
-  echo "📥 Downloading kernel and initrd..."
-
-  # Pobierz kernel i initrd - przykładowe pliki (możesz je zmienić)
-  KERNEL_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/vmlinuz-lts"
-  INITRD_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/initramfs-lts"
-
-  wget -N -P "$ISODIR/boot" "$KERNEL_URL" || {
-    echo "⚠️ Warning: Kernel file not found at $KERNEL_URL"
-  }
-  wget -N -P "$ISODIR/boot" "$INITRD_URL" || {
-    echo "⚠️ Warning: Initrd file not found at $INITRD_URL"
-  }
-
+# --- Build ISO ---
+if [ "$BUILD_ISO" = "true" ]; then
   echo "🛠️ Creating ISO image..."
-
-  ISO_NAME="alpine-${ALPINE_VERSION}-custom.iso"
-  cd "$ISODIR"
-
-  if [ "$ISO_MAKER" == "xorriso" ]; then
-    xorriso -as mkisofs -o "../$ISO_NAME" -b boot/vmlinuz-lts -c boot/boot.catalog -no-emul-boot -boot-load-size 4 -boot-info-table .
-  else
-    mkisofs -o "../$ISO_NAME" -b boot/vmlinuz-lts -c boot/boot.catalog -no-emul-boot -boot-load-size 4 -boot-info-table .
-  fi
-
-  echo "✅ ISO image created at: $WORKDIR/$ISO_NAME"
+  cd "$BASE_DIR"
+  xorriso -as mkisofs \
+    -o "../${OUTPUT_ISO}" \
+    -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+    -c boot/boot.cat \
+    -b boot/syslinux.bin \
+    -no-emul-boot \
+    -boot-load-size 4 \
+    -boot-info-table \
+    -eltorito-alt-boot \
+    -e boot/efiboot.img \
+    -no-emul-boot \
+    -isohybrid-gpt-basdat \
+    -V "Alpine-${ALPINE_VERSION}" \
+    "$ISO_DIR" || echo "⚠️ Failed to create ISO image!"
+  cd -
+else
+  echo "ℹ️ Skipping ISO build step."
 fi
