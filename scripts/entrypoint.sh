@@ -14,12 +14,6 @@ echo "Using Alpine version: $ALPINE_VERSION"
 echo "Use cache: $USE_CACHE"
 echo "Build ISO: $BUILD_ISO"
 
-# Make sure proot is installed
-if ! command -v proot &>/dev/null; then
-  echo "Installing proot..."
-  sudo apt-get update && sudo apt-get install -y proot
-fi
-
 # Download minirootfs if not cached
 if [ "$USE_CACHE" != "true" ] || [ ! -f "$MINIROOTFS" ]; then
   echo "Downloading Alpine minirootfs..."
@@ -33,9 +27,14 @@ rm -rf "$ROOTFS_DIR"
 mkdir -p "$ROOTFS_DIR"
 tar -xzf "$MINIROOTFS" -C "$ROOTFS_DIR"
 
-# Install packages using proot (not chroot)
-echo "Installing extra packages into rootfs using proot..."
-proot -R "$ROOTFS_DIR" /bin/sh -c "apk update && apk add bash python3 parted mc"
+# Add required packages using proot + apk.static
+echo "Installing packages with apk.static..."
+
+curl -sSL -o apk.static "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/main/x86_64/apk.static"
+chmod +x apk.static
+
+./apk.static -X "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/main" \
+  --allow-untrusted --root "$ROOTFS_DIR" --initdb add bash python3 parted mc
 
 # Build ISO
 if [ "$BUILD_ISO" = "true" ]; then
@@ -70,4 +69,3 @@ EOF
 
   echo "✅ ISO built successfully: alpine-live.iso"
 fi
-
