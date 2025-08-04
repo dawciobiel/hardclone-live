@@ -18,7 +18,7 @@ CACHE_DIR="$BUILD_DIR/cache"
 ISO_DIR="$REPO_DIR/iso"
 
 echo "🔍 Checking required tools..."
-for cmd in wget 7z xorriso tar bash proot; do
+for cmd in wget 7z xorriso tar bash proot curl squashfs-tools p7zip-full wget; do
     if ! command -v "$cmd" &> /dev/null; then
         echo "❌ Required tool '$cmd' not found"
         exit 1
@@ -45,11 +45,10 @@ chmod +x "$ISO_ROOT/welcome.sh"
 if [ "$BUILD_ISO" = "true" ]; then
     echo "📦 Creating ISO image..."
 
+    # Copy local isohdpfx.bin from tools directory to cache
+    cp "$REPO_DIR/tools/isohdpfx.bin" "$CACHE_DIR/isohdpfx.bin"
+
     BOOT_IMAGE="$CACHE_DIR/isohdpfx.bin"
-    if [ ! -f "$BOOT_IMAGE" ]; then
-        echo "⬇️ Downloading isohdpfx.bin..."
-        wget -O "$BOOT_IMAGE" "https://git.kernel.org/pub/scm/boot/syslinux/syslinux.git/plain/mbr/isohdpfx.bin"
-    fi
 
     xorriso -as mkisofs \
         -o "$ISO_DIR/alpine-$ALPINE_VERSION-cli-live.iso" \
