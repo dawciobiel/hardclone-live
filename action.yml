@@ -1,4 +1,4 @@
-name: 'Build 7:38 Alpine Linux Live CLI'
+name: 'Build 7:53 Alpine Linux Live CLI'
 description: 'Builds a bootable Alpine Linux Live CLI distribution with Python, editors, and system tools'
 author: 'Alpine Live Builder'
 
@@ -381,6 +381,18 @@ runs:
         
         cat /usr/lib/grub/i386-pc/cdboot.img iso-build/boot/grub/i386-pc/core.img > iso-build/boot/grub/i386-pc/eltorito.img
         
+        echo "Creating EFI boot image..."
+        # Create EFI boot image
+        dd if=/dev/zero of=efiboot.img bs=1M count=10
+        mkfs.fat -F16 efiboot.img
+        mkdir -p efi-mount
+        sudo mount -o loop efiboot.img efi-mount
+        mkdir -p efi-mount/efi/boot
+        cp iso-build/efi/boot/bootx64.efi efi-mount/efi/boot/
+        cp iso-build/efi/boot/grub.cfg efi-mount/efi/boot/
+        sudo umount efi-mount
+        rmdir efi-mount
+        
         echo "Building hybrid ISO with UEFI and BIOS support..."
         xorriso -as mkisofs \
           -iso-level 3 \
@@ -394,11 +406,12 @@ runs:
           -boot-load-size 4 \
           -boot-info-table \
           -eltorito-alt-boot \
-          -efi-boot efi/boot/bootx64.efi \
+          -e efiboot.img \
           -no-emul-boot \
           -isohybrid-gpt-basdat \
           -output alpine-live-cli.iso \
-          iso-build/
+          iso-build/ \
+          efiboot.img
         
         echo "ISO created successfully!"
 
