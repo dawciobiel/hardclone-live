@@ -1,90 +1,107 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-ALPINE_VERSION="$1"
-USE_CACHE="$2"
-BUILD_ISO="$3"
-BASE_DIR="$(pwd)/alpine-${ALPINE_VERSION}"
-ROOTFS_DIR="${BASE_DIR}/rootfs"
-ISO_DIR="${BASE_DIR}/iso"
-OUTPUT_ISO="alpine-${ALPINE_VERSION}-custom.iso"
+ALPINE_VERSION="${1:-3.18}"
+USE_CACHE="${2:-true}"
+BUILD_ISO="${3:-true}"
 
-echo "📦 Alpine version: ${ALPINE_VERSION}"
-echo "🗃️ Use cache: ${USE_CACHE}"
-echo "📀 Build ISO: ${BUILD_ISO}"
+ROOT_DIR="$(pwd)"
+WORKDIR="$ROOT_DIR/alpine-$ALPINE_VERSION"
+ROOTFS_DIR="$WORKDIR/rootfs"
+ISO_DIR="$WORKDIR/iso"
+ISO_OUTPUT="$ROOT_DIR/alpine-$ALPINE_VERSION-custom.iso"
 
-# --- Checking required tools ---
+echo "📦 Alpine version: $ALPINE_VERSION"
+echo "🗃️ Use cache: $USE_CACHE"
+echo "📀 Build ISO: $BUILD_ISO"
+
 echo "🔍 Checking required tools..."
+for tool in wget 7z xorriso tar bash; do
+    if command -v "$tool" >/dev/null 2>&1; then
+        echo "✅ $tool found: $($tool --version 2>/dev/null | head -n 1 || echo OK)"
+    else
+        echo "❌ $tool is not installed. Exiting."
+        exit 1
+    fi
+done
 
-check_tool() {
-  TOOL="$1"
-  if command -v "$TOOL" > /dev/null 2>&1; then
-    echo "✅ $TOOL found: $($TOOL --version | head -n1)"
-  else
-    echo "❌ $TOOL NOT found!"
-    MISSING=true
-  fi
-}
+mkdir -p "$ROOTFS_DIR" "$ISO_DIR/boot" "$ISO_DIR/syslinux"
 
-MISSING=false
-check_tool wget
-check_tool 7z
-check_tool xorriso
-check_tool tar
-check_tool bash
+MINIROOTFS="alpine-minirootfs-$ALPINE_VERSION-x86_64.tar.gz"
+MINIROOTFS_URL="https://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/releases/x86_64/$MINIROOTFS"
 
-if [ "$MISSING" = true ]; then
-  echo "❌ One or more required tools are missing. Exiting."
-  exit 1
-fi
-
-# --- Download and extract rootfs ---
-if [ "$USE_CACHE" != "true" ] || [ ! -d "$ROOTFS_DIR" ]; then
-  echo "📥 Downloading apk.static and base packages..."
-  mkdir -p "$ROOTFS_DIR"
-  cd "$BASE_DIR"
-  wget -q "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/alpine-minirootfs-${ALPINE_VERSION}.0-x86_64.tar.gz"
-  echo "✅ Download completed. Extracting..."
-  tar -xzf "alpine-minirootfs-${ALPINE_VERSION}.0-x86_64.tar.gz" -C "$ROOTFS_DIR"
-  echo "✅ Root filesystem prepared at: $ROOTFS_DIR"
-  cd -
+if [[ "$USE_CACHE" != "true" || ! -f "$MINIROOTFS" ]]; then
+    echo "📥 Downloading apk.static and base packages..."
+    wget -q --show-progress "$MINIROOTFS_URL" -O "$MINIROOTFS"
 else
-  echo "✅ Using cached rootfs at: $ROOTFS_DIR"
+    echo "💾 Using cached minirootfs: $MINIROOTFS"
 fi
 
-# --- Prepare ISO structure ---
-echo "🚧 Preparing ISO structure..."
-mkdir -p "$ISO_DIR/boot"
+echo "✅ Download completed. Extracting..."
+tar -xzf "$MINIROOTFS" -C "$ROOTFS_DIR"
+echo "✅ Root filesystem prepared at: $ROOTFS_DIR"
 
-KERNEL_FILE="vmlinuz"
-INITRD_FILE="initramfs"
+echo "🚧 Preparing ISO structure..."
+
+# Copy rootfs content
+cp -a "$ROOTFS_DIR/." "$ISO_DIR/"
 
 echo "📥 Downloading kernel and initrd..."
-KERNEL_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/${KERNEL_FILE}"
-INITRD_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/${INITRD_FILE}"
+KERNEL_NAME="vmlinuz-virt"
+INITRD_NAME="initramfs-virt"
 
-wget -q -O "$ISO_DIR/boot/$KERNEL_FILE" "$KERNEL_URL" || echo "⚠️ Warning: Kernel file not found at $KERNEL_URL"
-wget -q -O "$ISO_DIR/boot/$INITRD_FILE" "$INITRD_URL" || echo "⚠️ Warning: Initrd file not found at $INITRD_URL"
+KERNEL_URL="https://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/releases/x86_64/$KERNEL_NAME"
+INITRD_URL="https://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/releases/x86_64/$INITRD_NAME"
 
-# --- Build ISO ---
-if [ "$BUILD_ISO" = "true" ]; then
-  echo "🛠️ Creating ISO image..."
-  cd "$BASE_DIR"
-  xorriso -as mkisofs \
-    -o "../${OUTPUT_ISO}" \
-    -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
-    -c boot/boot.cat \
-    -b boot/syslinux.bin \
-    -no-emul-boot \
-    -boot-load-size 4 \
-    -boot-info-table \
-    -eltorito-alt-boot \
-    -e boot/efiboot.img \
-    -no-emul-boot \
-    -isohybrid-gpt-basdat \
-    -V "Alpine-${ALPINE_VERSION}" \
-    "$ISO_DIR" || echo "⚠️ Failed to create ISO image!"
-  cd -
-else
-  echo "ℹ️ Skipping ISO build step."
-fi
+wget -q --show-progress "$KERNEL_URL" -O "$ISO_DIR/boot/$KERNEL_NAME" || echo "⚠️ Warning: Kernel file not found at $KERNEL_URL"
+wget -q --show-progress "$INITRD_URL" -O "$ISO_DIR/boot/$INITRD_NAME" || echo "⚠️ Warning: Initrd file not found at $INITRD_URL"
+
+echo "📥 Downloading syslinux bootloader..."
+SYSLINUX_PKG="syslinux-6.04_pre1-r4.apk"
+wget -q "https://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/main/x86_64/$SYSLINUX_PKG"
+mkdir -p syslinux-extract
+7z x "$SYSLINUX_PKG" -osyslinux-extract > /dev/null
+7z x "syslinux-extract/data.tar.gz" -osyslinux-extract > /dev/null
+
+cp syslinux-extract/usr/share/syslinux/isolinux.bin "$ISO_DIR/syslinux/"
+cp syslinux-extract/usr/share/syslinux/ldlinux.c32 "$ISO_DIR/syslinux/"
+cp syslinux-extract/usr/share/syslinux/libcom32.c32 "$ISO_DIR/syslinux/"
+cp syslinux-extract/usr/share/syslinux/libutil.c32 "$ISO_DIR/syslinux/"
+cp syslinux-extract/usr/share/syslinux/menu.c32 "$ISO_DIR/syslinux/"
+cp syslinux-extract/usr/share/syslinux/vesamenu.c32 "$ISO_DIR/syslinux/"
+
+cp syslinux-extract/usr/lib/syslinux/isohdpfx.bin "$ISO_DIR/"
+
+cat > "$ISO_DIR/syslinux/isolinux.cfg" <<EOF
+UI vesamenu.c32
+PROMPT 0
+TIMEOUT 50
+DEFAULT alpine
+
+LABEL alpine
+  KERNEL /boot/$KERNEL_NAME
+  INITRD /boot/$INITRD_NAME
+  APPEND initrd=/boot/$INITRD_NAME console=ttyS0
+EOF
+
+echo "🛠️ Creating ISO image..."
+cd "$ISO_DIR"
+
+xorriso \
+  -as mkisofs \
+  -o "$ISO_OUTPUT" \
+  -isohybrid-mbr ./isohdpfx.bin \
+  -c syslinux/boot.cat \
+  -b syslinux/isolinux.bin \
+  -no-emul-boot \
+  -boot-load-size 4 \
+  -boot-info-table \
+  -V "ALPINE_LIVE" \
+  -eltorito-alt-boot \
+  -e boot/$INITRD_NAME \
+  -no-emul-boot \
+  -isohybrid-apm-hfsplus \
+  -isohybrid-gpt-basdat \
+  .
+
+echo "✅ ISO image created at $ISO_OUTPUT"
