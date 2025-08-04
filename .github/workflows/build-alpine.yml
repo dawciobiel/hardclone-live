@@ -14,7 +14,6 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # Cache for Alpine minirootfs
     - name: Cache Alpine minirootfs
       uses: actions/cache@v4
       id: cache-alpine
@@ -30,6 +29,13 @@ jobs:
         alpine-version: '3.19'
         upload-artifacts: 'true'
         use-cache: 'true'
+
+    - name: Set default shell to bash
+      run: |
+        echo "Changing default shell to bash for alpine user"
+        sudo sed -i 's|/home/alpine:/bin/ash|/home/alpine:/bin/bash|' rootfs/etc/passwd || true
+        sudo chroot rootfs chsh -s /bin/bash alpine || true
+        echo "Default shell changed."
 
     - name: Create Release (on tag)
       if: startsWith(github.ref, 'refs/tags/')
