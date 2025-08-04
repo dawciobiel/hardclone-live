@@ -1,38 +1,40 @@
-name: Alpine live
+name: Build Alpine ISO
 
 on:
   workflow_dispatch:
     inputs:
-      alpine-version:
-        description: 'Alpine version (e.g. 3.18)'
-        required: true
+      alpine_version:
+        description: 'Alpine version'
+        required: false
         default: '3.18'
-      use-cache:
-        description: 'Use cached minirootfs'
+      use_cache:
+        description: 'Use cache'
         required: false
         default: 'true'
-      build-iso:
-        description: 'Build the ISO image'
+      build_iso:
+        description: 'Build ISO'
         required: false
         default: 'true'
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    name: Build Alpine Live ISO
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up dependencies
-        run: sudo apt-get update && sudo apt-get install -y curl xorriso squashfs-tools p7zip-full wget
+      - name: Install required packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget p7zip-full xorriso tar bash proot
 
-      - name: Run welcome script
-        run: bash ./config/welcome.sh
+      - name: Make entrypoint executable
+        run: chmod +x "${{ github.workspace }}/.github/actions/build-alpine/entrypoint.sh"
 
-      - name: Build ISO
-        uses: ./.github/actions/build-alpine
-        with:
-          alpine-version: ${{ inputs.alpine-version }}
-          use-cache: ${{ inputs.use-cache }}
-          build-iso: ${{ inputs.build-iso }}
+      - name: Run Alpine ISO build script
+        run: |
+          "${{ github.workspace }}/.github/actions/build-alpine/entrypoint.sh" \
+            "${{ github.event.inputs.alpine_version }}" \
+            "${{ github.event.inputs.use_cache }}" \
+            "${{ github.event.inputs.build_iso }}"
