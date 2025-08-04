@@ -28,7 +28,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y curl xorriso squashfs-tools proot
 
       - name: Build ISO
-        uses: ./.github/actions/build-alpine
+        uses: ./build-alpine
         with:
           alpine-version: ${{ inputs.alpine-version }}
           use-cache: ${{ inputs.use-cache }}
