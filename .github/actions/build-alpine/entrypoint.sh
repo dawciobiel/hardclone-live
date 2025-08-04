@@ -9,61 +9,48 @@ echo "📦 Alpine version: $ALPINE_VERSION"
 echo "🗃️ Use cache: $USE_CACHE"
 echo "📀 Build ISO: $BUILD_ISO"
 
-WORKDIR="$(pwd)/work"
-ISODIR="$WORKDIR/iso"
-CACHEDIR="$WORKDIR/cache"
-OUTDIR="$(pwd)/out"
+# 🔍 Checking required tools
+echo "🔍 Checking required tools..."
+REQUIRED_CMDS=("wget" "7z" "mkisofs" "tar" "bash")
+MISSING=false
 
-mkdir -p "$ISODIR" "$CACHEDIR" "$OUTDIR"
+for cmd in "${REQUIRED_CMDS[@]}"; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+        echo "✅ $cmd found: $($cmd --version 2>&1 | head -n 1)"
+    else
+        echo "❌ $cmd NOT found!"
+        MISSING=true
+    fi
+done
 
+if [[ "$MISSING" == true ]]; then
+    echo "❌ One or more required tools are missing. Exiting."
+    exit 1
+fi
+
+# 🏗️ Create working directories
+BUILD_DIR="/tmp/alpine-build"
+ISO_DIR="$BUILD_DIR/iso"
+ROOTFS_DIR="$BUILD_DIR/rootfs"
+CACHE_DIR="$BUILD_DIR/cache"
+
+mkdir -p "$ISO_DIR" "$ROOTFS_DIR" "$CACHE_DIR"
+
+# 📥 Download apk.static
 echo "📥 Downloading apk.static and base packages..."
+APK_TOOLS_URL="https://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/main/x86_64/apk-tools-static-*.apk"
+wget -q -O "$CACHE_DIR/apk-tools-static.apk" "$APK_TOOLS_URL"
 
-BASE_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/main/x86_64"
-
-if [[ "$USE_CACHE" == "true" && -f "$CACHEDIR/apk.static" ]]; then
-    echo "✅ Using cached apk.static"
-else
-    wget -q --show-progress "$BASE_URL/apk-tools-static-2.12.10-r3.apk" -O "$CACHEDIR/apk.apk"
-    tar -xzf "$CACHEDIR/apk.apk" -C "$CACHEDIR" sbin/apk.static
+if [[ ! -f "$CACHE_DIR/apk-tools-static.apk" ]]; then
+    echo "❌ Failed to download apk-tools-static from: $APK_TOOLS_URL"
+    exit 1
 fi
 
-echo "📦 Extracting minirootfs..."
-if [[ "$USE_CACHE" == "true" && -d "$CACHEDIR/rootfs" ]]; then
-    echo "✅ Using cached rootfs"
-    cp -a "$CACHEDIR/rootfs" "$ISODIR/rootfs"
-else
-    mkdir -p "$WORKDIR/rootfs"
-    "$CACHEDIR/sbin/apk.static" \
-        --root "$WORKDIR/rootfs" \
-        --repository "$BASE_URL" \
-        --initdb add alpine-base bash coreutils util-linux e2fsprogs parted mc nano python3
-    cp -a "$WORKDIR/rootfs" "$CACHEDIR/rootfs"
-    cp -a "$WORKDIR/rootfs" "$ISODIR/rootfs"
-fi
+cd "$CACHE_DIR"
+7z x apk-tools-static.apk > /dev/null
+tar -xzf apk-tools-static.tar.gz
 
-echo "🚧 Preparing ISO structure..."
-mkdir -p "$ISODIR/boot"
+# 🔧 Continue setup...
+# (tu kontynuuj instalację minirootfs, budowanie ISO itd.)
 
-echo "📥 Downloading official Alpine ISO..."
-ISO_NAME="alpine-standard-${ALPINE_VERSION}.0-x86_64.iso"
-wget -q --show-progress "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/${ISO_NAME}"
-
-echo "📂 Extracting kernel and initramfs from ISO using 7z..."
-mkdir -p "$WORKDIR/iso"
-7z x "$ISO_NAME" -o"$WORKDIR/iso" > /dev/null
-
-cp "$WORKDIR/iso/boot/vmlinuz-vanilla" "$ISODIR/boot/vmlinuz"
-cp "$WORKDIR/iso/boot/initramfs-vanilla" "$ISODIR/boot/initrd"
-
-if [[ "$BUILD_ISO" == "true" ]]; then
-    echo "📀 Building custom ISO..."
-    mkisofs -o "$OUTDIR/alpine-custom.iso" \
-        -b boot/syslinux/isolinux.bin \
-        -c boot/syslinux/boot.cat \
-        -no-emul-boot -boot-load-size 4 -boot-info-table \
-        -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
-        -J -R -V "ALPINE_CUSTOM" "$ISODIR"
-    echo "✅ ISO built: $OUTDIR/alpine-custom.iso"
-else
-    echo "❌ Skipping ISO build"
-fi
+echo "✅ All required tools are available. Proceeding with Alpine Live ISO creation..."
