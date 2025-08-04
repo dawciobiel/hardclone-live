@@ -12,12 +12,24 @@ inputs:
     description: 'Whether to build ISO at the end'
     required: false
     default: 'true'
+
 runs:
   using: "composite"
   steps:
-    - run: echo "Current directory: $(pwd)"; ls -lah
+    - name: Show current directory
+      run: echo "Current directory:"
       shell: bash
-    - run: chmod +x ${{ github.action_path }}/entrypoint.sh
+
+    - run: pwd
       shell: bash
-    - run: ${{ github.action_path }}/entrypoint.sh "${{ inputs.alpine-version }}" "${{ inputs.use-cache }}" "${{ inputs.build-iso }}"
+
+    - run: ls -lah
+      shell: bash
+
+    - name: Make entrypoint executable
+      run: chmod +x "${{ github.action_path }}/entrypoint.sh"
+      shell: bash
+
+    - name: Run entrypoint script
+      run: ${{ github.action_path }}/entrypoint.sh "${{ inputs.alpine-version }}" "${{ inputs.use-cache }}" "${{ inputs.build-iso }}"
       shell: bash
