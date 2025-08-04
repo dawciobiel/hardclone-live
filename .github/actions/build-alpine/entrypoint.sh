@@ -1,108 +1,103 @@
 #!/bin/bash
 set -e
 
+# Input arguments
 ALPINE_VERSION="$1"
 USE_CACHE="$2"
 BUILD_ISO="$3"
 
-echo "📦 Using Alpine version: $ALPINE_VERSION"
-echo "🗂️ Use cache: $USE_CACHE"
-echo "💿 Build ISO: $BUILD_ISO"
+echo "📦 Alpine version: $ALPINE_VERSION"
+echo "🗃️ Use cache: $USE_CACHE"
+echo "📀 Build ISO: $BUILD_ISO"
 
-WORKDIR="$(pwd)/alpine-${ALPINE_VERSION}"
-CACHEDIR="$WORKDIR/cache"
-ISODIR="$WORKDIR/iso"
-ROOTFS_DIR="$WORKDIR/rootfs"
-OUT_ISO="alpine-${ALPINE_VERSION}-live.iso"
-MINIROOTFS_TAR="alpine-minirootfs-${ALPINE_VERSION}.0-x86_64.tar.gz"
-MINIROOTFS_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/${MINIROOTFS_TAR}"
+# Define working directories
+ROOTDIR="$(pwd)/work/rootfs"
+ISODIR="$(pwd)/work/isodir"
+CACHEDIR="$(pwd)/work/cache"
 
-mkdir -p "$CACHEDIR" "$ISODIR" "$ROOTFS_DIR"
+mkdir -p "$ROOTDIR" "$ISODIR/boot" "$CACHEDIR"
 
-cd "$CACHEDIR"
+# Function to download apk.static and unpack rootfs
+download_and_unpack_rootfs() {
+  echo "📥 Downloading apk.static and base packages..."
 
-# Step 1: Download minirootfs if needed
-if [[ "$USE_CACHE" != "true" || ! -f "$MINIROOTFS_TAR" ]]; then
-  echo "⬇️ Downloading Alpine Minirootfs..."
-  wget -q --show-progress "$MINIROOTFS_URL"
+  cd "$CACHEDIR"
+
+  # Download apk.static
+  if [ ! -f "apk.static" ]; then
+    wget "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/main/x86_64/apk.static"
+    chmod +x apk.static
+  fi
+
+  # Fetch base packages
+  ./apk.static -X "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/main" \
+               -U --allow-untrusted \
+               --root "$ROOTDIR" --initdb add alpine-base bash e2fsprogs-extra util-linux
+
+  echo "✅ Base system unpacked into $ROOTDIR"
+}
+
+# Step 1: prepare rootfs if not using cache or cache is empty
+if [ "$USE_CACHE" != "true" ] || [ ! -d "$ROOTDIR/bin" ]; then
+  rm -rf "$ROOTDIR"
+  mkdir -p "$ROOTDIR"
+  download_and_unpack_rootfs
 else
-  echo "✅ Using cached $MINIROOTFS_TAR"
+  echo "📁 Using cached rootfs"
 fi
 
-# Step 2: Extract rootfs
-echo "📂 Extracting minirootfs..."
-rm -rf "$ROOTFS_DIR"/*
-tar -xzf "$MINIROOTFS_TAR" -C "$ROOTFS_DIR"
-
-# Step 3: Setup base system in proot
-echo "🔧 Installing extra packages in proot..."
-mkdir -p "$ROOTFS_DIR/proot-tmp"
-proot -R "$ROOTFS_DIR" /bin/sh -c "
-  apk update &&
-  apk add bash coreutils util-linux e2fsprogs dosfstools syslinux xorriso \
-          parted python3 nano mc htop curl wget ca-certificates
-"
-
-# Step 4: Create init script
+# Step 2: minimal init script
 echo "📝 Creating init script..."
-cat > "$ROOTFS_DIR/init" <<'EOF'
+cat << 'EOF' > "$ROOTDIR/init"
 #!/bin/sh
 mount -t proc none /proc
 mount -t sysfs none /sys
 mount -t devtmpfs none /dev
 clear
-echo "Welcome to Alpine Linux Live CLI!"
+echo "Welcome to Alpine Linux CLI Live!"
 /bin/sh
 EOF
 
-chmod +x "$ROOTFS_DIR/init"
+chmod +x "$ROOTDIR/init"
 
-# Step 5: Prepare ISO structure
-echo "📁 Building ISO structure..."
-mkdir -p "$ISODIR"/{boot/grub,boot/syslinux}
-cp -a "$ROOTFS_DIR"/* "$ISODIR"
+# Step 3: build ISO only if requested
+if [ "$BUILD_ISO" == "true" ]; then
+  echo "📁 Building ISO structure..."
 
-# Step 6: Create isolinux.cfg
-cat > "$ISODIR/boot/syslinux/isolinux.cfg" <<EOF
-UI menu.c32
-PROMPT 0
-TIMEOUT 50
-DEFAULT alpine
+  mkdir -p "$ISODIR/boot" "$ISODIR/boot/grub"
 
-LABEL alpine
-  KERNEL /boot/vmlinuz
-  APPEND initrd=/boot/initrd.gz init=/init
+  # Download vmlinuz and initramfs (mainline kernel)
+  echo "📥 Downloading kernel and initrd from Alpine repo..."
+  wget -q --show-progress "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/vmlinuz" -O "$ISODIR/boot/vmlinuz"
+  wget -q --show-progress "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/initramfs" -O "$ISODIR/boot/initrd.gz"
+
+  # Create grub.cfg
+  echo "⚙️ Creating GRUB config..."
+  cat <<EOF > "$ISODIR/boot/grub/grub.cfg"
+set default=0
+set timeout=5
+
+menuentry "Alpine Linux CLI Live" {
+    linux /boot/vmlinuz quiet
+    initrd /boot/initrd.gz
+}
 EOF
 
-# Step 7: Download prebuilt kernel and initrd from Alpine
-echo "📥 Downloading kernel and initrd from Alpine repo..."
-
-KERNEL_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64"
-wget -q --show-progress "$KERNEL_URL"/vmlinuz-lts -O "$ISODIR/boot/vmlinuz"
-wget -q --show-progress "$KERNEL_URL"/initramfs-lts -O "$ISODIR/boot/initrd.gz"
-
-
-# Step 8: Copy syslinux binaries
-cp /usr/lib/ISOLINUX/isolinux.bin "$ISODIR/boot/syslinux/"
-cp /usr/lib/syslinux/modules/bios/* "$ISODIR/boot/syslinux/" || true
-
-# Step 9: Build final ISO
-if [[ "$BUILD_ISO" == "true" ]]; then
-  echo "💿 Building final ISO image..."
+  echo "📀 Creating ISO image..."
   xorriso -as mkisofs \
-    -o "$OUT_ISO" \
-    -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
-    -c boot/syslinux/boot.cat \
-    -b boot/syslinux/isolinux.bin \
+    -iso-level 3 \
+    -full-iso9660-filenames \
+    -volid "AlpineCLI" \
+    -output "alpine-live-${ALPINE_VERSION}.iso" \
+    -eltorito-boot boot/grub/i386-pc/eltorito.img \
     -no-emul-boot -boot-load-size 4 -boot-info-table \
-    -eltorito-alt-boot \
-    -e boot/grub/efi.img \
-    -no-emul-boot \
-    -isohybrid-gpt-basdat \
-    -V "AlpineLive" \
+    -eltorito-catalog boot/grub/boot.cat \
+    -boot-load-size 4 -boot-info-table \
+    -grub2-boot-info \
+    -grub2-mbr "$ISODIR/boot/grub/i386-pc/boot_hybrid.img" \
     "$ISODIR"
 
-  echo "✅ ISO created: $OUT_ISO"
+  echo "✅ ISO image created: alpine-live-${ALPINE_VERSION}.iso"
 else
-  echo "🛑 ISO build skipped (BUILD_ISO=$BUILD_ISO)"
+  echo "📦 ISO build skipped (BUILD_ISO=${BUILD_ISO})"
 fi
