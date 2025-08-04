@@ -58,13 +58,13 @@ runs:
       shell: bash
       run: |
         sudo chroot rootfs apk add --no-cache \
-          vim neovim nano mc \
-          parted e2fsprogs util-linux \
-          gdisk dosfstools \
-          gzip zstd bzip2 xz \
-          gnupg openssl \
-          python3 py3-psutil \
-          coreutils
+        vim neovim nano mc \
+        parted e2fsprogs util-linux \
+        gptfdisk dosfstools \
+        gzip zstd bzip2 xz \
+        gnupg openssl \
+        python3 py3-psutil \
+        coreutils
 
     - name: Create ISO image
       shell: bash
