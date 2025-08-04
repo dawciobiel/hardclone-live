@@ -2,7 +2,7 @@ name: 'Build Alpine ISO'
 description: 'Creates a bootable Alpine Linux ISO with extra packages'
 inputs:
   alpine-version:
-    description: 'Alpine version (e.g., 3.19)'
+    description: 'Alpine version 3.20'
     required: true
   use-cache:
     description: 'Use cached minirootfs if available'
