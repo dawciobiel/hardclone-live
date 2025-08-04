@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       alpine-version:
-        description: 'Alpine version (e.g. 3.18)'
+        description: 'Alpine version (e.g. 3.19)'
         required: true
-        default: '3.18'
+        default: '3.19'
       use-cache:
         description: 'Use cached minirootfs'
         required: false
