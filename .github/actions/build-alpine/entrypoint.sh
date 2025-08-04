@@ -31,8 +31,8 @@ for cmd in wget 7z xorriso tar bash proot curl mksquashfs; do
     echo "✅ $cmd found: $(command -v $cmd)"
 done
 
-echo "📥 Downloading Syslinux BIOS boot files..."
-"$REPO_DIR/live/scripts/fetch-syslinux.sh" "$CACHE_DIR"
+echo "📥 Using local Syslinux BIOS boot files..."
+cp "$REPO_DIR/tools/isohdpfx.bin" "$CACHE_DIR/isohdpfx.bin"
 
 echo "⬇️ Downloading and extracting Alpine minirootfs..."
 ARCH="x86_64"
@@ -60,6 +60,15 @@ if [ "$BUILD_ISO" = "true" ]; then
         echo "❌ Missing isohdpfx.bin in $CACHE_DIR"
         exit 1
     fi
+
+    # Ensure syslinux files are inside ISO root at boot/syslinux/
+    SYSROOT="$ISO_ROOT/boot/syslinux"
+    mkdir -p "$SYSROOT"
+    cp "$REPO_DIR/iso/boot/isolinux/isolinux.bin" "$SYSROOT/"
+    cp "$REPO_DIR/iso/boot/isolinux/ldlinux.c32" "$SYSROOT/"
+    cp "$REPO_DIR/iso/boot/isolinux/memdisk" "$SYSROOT/"
+    cp "$REPO_DIR/iso/boot/isolinux/menu.c32" "$SYSROOT/"
+    cp "$REPO_DIR/iso/boot/isolinux/vesamenu.c32" "$SYSROOT/"
 
     xorriso -as mkisofs \
         -o "$ISO_DIR/alpine-$ALPINE_VERSION-cli-live.iso" \
