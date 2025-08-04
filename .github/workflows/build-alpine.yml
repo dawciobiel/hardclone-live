@@ -1,63 +1,35 @@
-name: Build Alpine Linux Live CLI
+name: build-alpine-live
 
 on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
+    inputs:
+      alpine-version:
+        description: 'Alpine version (e.g. 3.19)'
+        required: true
+        default: '3.19'
+      use-cache:
+        description: 'Use cached minirootfs'
+        required: false
+        default: 'true'
+      build-iso:
+        description: 'Build the ISO image'
+        required: false
+        default: 'true'
 
 jobs:
-  build-alpine-live:
+  build:
     runs-on: ubuntu-latest
+    name: Build Alpine Live ISO
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Cache Alpine minirootfs
-        uses: actions/cache@v4
-        id: cache-alpine
+      - name: Set up dependencies
+        run: sudo apt-get update && sudo apt-get install -y curl xorriso squashfs-tools proot
+
+      - name: Build ISO
+        uses: ./github/actions/build-alpine
         with:
-          path: alpine-minirootfs.tar.gz
-          key: alpine-minirootfs-3.19-x86_64
-          restore-keys: |
-            alpine-minirootfs-3.19-
-
-      - name: Build Alpine Linux Live CLI
-        uses: ./
-        with:
-          alpine-version: '3.19'
-          upload-artifacts: 'true'
-          use-cache: 'true'
-
-      - name: Create Release (on tag)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            alpine-live-cli.iso
-            alpine-live-cli.iso.sha256
-            alpine-live-cli.iso.md5
-          body: |
-            ## Alpine Linux Live CLI
-
-            Bootowalna dystrybucja Alpine Linux z narzędziami CLI
-
-            ### Zawiera:
-            - Python 3.12 z psutil (PySide6 opcjonalnie)
-            - Edytory: vim, neovim, nano, mc
-            - Narzędzia dyskowe: dd, lsblk, parted, gdisk
-            - Kompresja: gzip, zstd, bzip2, xz
-            - Bezpieczeństwo: gpg, sha256sum, md5sum
-            - Wsparcie UEFI i Legacy BIOS
-
-            ### Użycie:
-            1. Pobierz plik ISO
-            2. Nagraj na USB/DVD
-            3. Bootuj z UEFI lub BIOS
-            4. Zaloguj się jako `alpine` (hasło: `alpine`)
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+          alpine-version: ${{ inputs.alpine-version }}
+          use-cache: ${{ inputs.use-cache }}
+          build-iso: ${{ inputs.build-iso }}
