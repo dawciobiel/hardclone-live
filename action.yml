@@ -1,84 +1,102 @@
-name: 'Alpine Linux Live ISO Builder'
-description: 'Builds a bootable Alpine Linux CLI ISO with selected tools'
-author: 'Dawid Bielecki'
-
+name: 'Build Alpine Live ISO'
+description: 'Build an Alpine Linux Live ISO image with CLI tools'
 inputs:
   alpine-version:
-    description: 'Alpine Linux version to use (e.g. 3.19)'
+    description: 'Alpine version to use'
     required: false
     default: '3.19'
 
   upload-artifacts:
-    description: 'Upload the built ISO as a GitHub artifact (true/false)'
+    description: 'Whether to upload ISO and checksums as artifacts'
     required: false
-    default: 'true'
+    default: 'false'
 
   use-cache:
     description: 'Use cached Alpine minirootfs if available'
     required: false
-    default: 'true'
+    default: 'false'
 
 runs:
-  using: "composite"
+  using: 'composite'
   steps:
-    - name: Set up environment
+    - name: Set up variables
       shell: bash
       run: |
         set -e
         echo "Using Alpine version: ${{ inputs.alpine-version }}"
-        mkdir -p build
+        echo "ALPINE_VERSION=${{ inputs.alpine-version }}" >> $GITHUB_ENV
 
     - name: Download Alpine minirootfs
       shell: bash
       run: |
         set -e
-        ALPINE_VERSION="${{ inputs.alpine-version }}"
-        ROOTFS_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/alpine-minirootfs-${ALPINE_VERSION}.0-x86_64.tar.gz"
-        if [ ! -f alpine-minirootfs.tar.gz ]; then
-          echo "Downloading Alpine minirootfs..."
-          curl -L "$ROOTFS_URL" -o alpine-minirootfs.tar.gz
-        else
+        if [[ "${{ inputs.use-cache }}" == "true" && -f alpine-minirootfs.tar.gz ]]; then
           echo "Using cached minirootfs..."
+        else
+          curl -sSL -o alpine-minirootfs.tar.gz \
+            https://dl-cdn.alpinelinux.org/alpine/v${{ inputs.alpine-version }}/releases/x86_64/alpine-minirootfs-${{ inputs.alpine-version }}.0-x86_64.tar.gz
         fi
 
-    - name: Extract and configure minirootfs
+    - name: Extract rootfs and prepare
       shell: bash
       run: |
+        set -e
         mkdir -p rootfs
         sudo tar -xzf alpine-minirootfs.tar.gz -C rootfs
-        sudo cp /etc/resolv.conf rootfs/etc/
-        sudo chroot rootfs apk add --no-cache bash shadow
-        sudo chroot rootfs chsh -s /bin/bash
-        echo "Default shell changed to bash"
-        sudo chroot rootfs adduser -D alpine
-        echo "alpine:alpine" | sudo chroot rootfs chpasswd
-        sudo chroot rootfs adduser alpine wheel
 
-    - name: Add CLI tools
-      shell: bash
-      run: |
-        sudo chroot rootfs apk add --no-cache \
-        vim neovim nano mc \
-        parted e2fsprogs util-linux \
-        gptfdisk dosfstools \
-        gzip zstd bzip2 xz \
-        gnupg openssl \
-        python3 py3-psutil \
-        coreutils
+        sudo cp /etc/resolv.conf rootfs/etc/resolv.conf
 
-    - name: Create ISO image
+        # Setup chroot environment and install packages
+        sudo chroot rootfs /bin/sh -c "
+          apk update &&
+          apk add --no-cache \
+            bash \
+            coreutils \
+            vim neovim nano mc \
+            parted e2fsprogs util-linux \
+            gptfdisk dosfstools \
+            gzip zstd bzip2 xz \
+            gnupg openssl \
+            python3 py3-psutil \
+            shadow sudo \
+            cdrtools
+        "
+
+        # Set default shell to bash for alpine user
+        sudo sed -i 's#/bin/ash#/bin/bash#' rootfs/etc/passwd
+
+    - name: Create Alpine Live ISO
       shell: bash
       run: |
         echo "Creating Alpine Live ISO..."
-        ISO_NAME="alpine-live-cli.iso"
-        mkisofs -o $ISO_NAME -b boot/syslinux/isolinux.bin \
-          -c boot/syslinux/boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table \
-          -J -R -V "ALPINE_LIVE_CLI" rootfs
-        echo "ISO created: $ISO_NAME"
-        sha256sum $ISO_NAME > $ISO_NAME.sha256
-        md5sum $ISO_NAME > $ISO_NAME.md5
+        mkdir -p iso/boot/grub
 
-    - name: Upload ISO as artifact
+        # Copy kernel and initramfs
+        sudo cp rootfs/boot/vmlinuz-* iso/boot/vmlinuz
+        sudo cp rootfs/boot/initramfs-* iso/boot/initramfs
+
+        # Create minimal GRUB config
+        cat <<EOF > iso/boot/grub/grub.cfg
+        set default=0
+        set timeout=5
+
+        menuentry "Alpine Live CLI" {
+            linux /boot/vmlinuz modules=loop,squashfs,sd-mod,usb-storage quiet
+            initrd /boot/initramfs
+        }
+EOF
+
+        # Generate ISO
+        mkisofs -o alpine-live-cli.iso \
+          -b boot/grub/i386-pc/eltorito.img \
+          -no-emul-boot -boot-load-size 4 -boot-info-table \
+          -R -J -v -T iso
+
+        # Generate checksums
+        sha256sum alpine-live-cli.iso > alpine-live-cli.iso.sha256
+        md5sum alpine-live-cli.iso > alpine-live-cli.iso.md5
+
+    - name: Upload Artifacts (if enabled)
       if: ${{ inputs.upload-artifacts == 'true' }}
       uses: actions/upload-artifact@v4
       with:
