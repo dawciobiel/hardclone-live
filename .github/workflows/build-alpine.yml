@@ -19,7 +19,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: /var/cache/apt
-        key: apt-cache-${{ runner.os }}-${{ hashFiles('**/action.yml') }}
+        key: apt-cache-${{ runner.os }}-v1
         restore-keys: |
           apt-cache-${{ runner.os }}-
 
@@ -40,7 +40,7 @@ jobs:
         path: |
           /usr/lib/grub/
           /usr/share/grub/
-        key: grub-cache-${{ runner.os }}-${{ hashFiles('**/action.yml') }}
+        key: grub-cache-${{ runner.os }}-v1
         restore-keys: |
           grub-cache-${{ runner.os }}-
 

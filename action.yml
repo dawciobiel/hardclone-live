@@ -1,4 +1,4 @@
-name: 'Build 8:03 Alpine Linux Live CLI'
+name: 'Build Alpine Linux Live CLI'
 description: 'Builds a bootable Alpine Linux Live CLI distribution with Python, editors, and system tools'
 author: 'Alpine Live Builder'
 
@@ -81,18 +81,6 @@ runs:
         sudo mount --bind /proc proc/
         sudo mount --bind /sys sys/
         sudo cp /etc/resolv.conf etc/resolv.conf
-
-    # Cache for Alpine APK packages
-    - name: Cache Alpine APK packages
-      uses: actions/cache@v4
-      with:
-        path: |
-          alpine-live/var/cache/apk/
-          alpine-live/etc/apk/cache/
-        key: alpine-apk-cache-${{ inputs.alpine-version }}-${{ hashFiles('**/action.yml') }}
-        restore-keys: |
-          alpine-apk-cache-${{ inputs.alpine-version }}-
-          alpine-apk-cache-
 
     - name: Configure Alpine system - Base packages
       shell: bash
