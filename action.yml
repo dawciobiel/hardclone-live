@@ -19,4 +19,3 @@ runs:
       shell: bash
     - run: ./scripts/entrypoint.sh "${{ inputs.alpine-version }}" "${{ inputs.use-cache }}" "${{ inputs.build-iso }}"
       shell: bash
-
