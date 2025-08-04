@@ -1,4 +1,4 @@
-name: build-alpine-live
+name: Alpine live
 
 on:
   workflow_dispatch:
