@@ -1,95 +1,101 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
-ALPINE_VERSION="${1:-3.18}"
-USE_CACHE="${2:-true}"
-BUILD_ISO="${3:-true}"
+ALPINE_VERSION="$1"
+USE_CACHE="$2"
+BUILD_ISO="$3"
 
-echo "📦 Alpine version: ${ALPINE_VERSION}"
-echo "🗃️ Use cache: ${USE_CACHE}"
-echo "📀 Build ISO: ${BUILD_ISO}"
+echo "📦 Alpine version: $ALPINE_VERSION"
+echo "🗃️ Use cache: $USE_CACHE"
+echo "📀 Build ISO: $BUILD_ISO"
+
+# Directories
+ROOT_DIR="$(pwd)"
+BUILD_DIR="$ROOT_DIR/build"
+ISO_DIR="$ROOT_DIR/iso"
+CACHE_DIR="$ROOT_DIR/.cache"
+
+mkdir -p "$BUILD_DIR" "$ISO_DIR" "$CACHE_DIR"
 
 echo "🔍 Checking required tools..."
 
-check_tool() {
-    local tool="$1"
-    local version_cmd="$2"
-    if ! command -v "$tool" >/dev/null 2>&1; then
-        echo "❌ $tool not found!"
-        exit 1
-    else
-        local version_output
-        version_output=$(eval "$version_cmd" 2>/dev/null || echo "OK")
-        echo "✅ $tool found: $version_output"
-    fi
+for TOOL in wget 7z xorriso tar bash proot; do
+  if ! command -v "$TOOL" &>/dev/null; then
+    echo "❌ Required tool '$TOOL' not found"
+    exit 1
+  else
+    echo "✅ $TOOL found: $($TOOL --version | head -n1)"
+  fi
+done
+
+# File URLs
+BASE_URL="https://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/releases/x86_64"
+MINIROOTFS_NAME="alpine-minirootfs-$ALPINE_VERSION.0-x86_64.tar.gz"
+MINIROOTFS_URL="$BASE_URL/$MINIROOTFS_NAME"
+
+# Download minirootfs
+if [[ "$USE_CACHE" != "true" || ! -f "$CACHE_DIR/$MINIROOTFS_NAME" ]]; then
+  echo "📥 Downloading Alpine minirootfs..."
+  echo "🔗 $MINIROOTFS_URL"
+  wget -q --show-progress -O "$CACHE_DIR/$MINIROOTFS_NAME" "$MINIROOTFS_URL" || {
+    echo "❌ Failed to download minirootfs"
+    exit 1
+  }
+else
+  echo "✅ Using cached minirootfs"
+fi
+
+# Extract to build directory
+rm -rf "$BUILD_DIR/rootfs"
+mkdir -p "$BUILD_DIR/rootfs"
+tar -xzf "$CACHE_DIR/$MINIROOTFS_NAME" -C "$BUILD_DIR/rootfs"
+
+# Prepare rootfs
+echo "🔧 Injecting config into rootfs..."
+mkdir -p "$BUILD_DIR/rootfs/root/.config"
+echo "Welcome to Alpine $ALPINE_VERSION" > "$BUILD_DIR/rootfs/etc/motd"
+
+# Add your packages, AppImages, scripts, configs here
+# Example:
+cp -v "$ROOT_DIR/config/welcome.sh" "$BUILD_DIR/rootfs/root/"
+chmod +x "$BUILD_DIR/rootfs/root/welcome.sh"
+
+# Emulate chroot with proot to prepare system
+echo "🧪 Running setup inside rootfs using proot..."
+proot -R "$BUILD_DIR/rootfs" /bin/sh -c "/root/welcome.sh"
+
+# Optional ISO build
+if [[ "$BUILD_ISO" == "true" ]]; then
+  echo "📦 Creating ISO image..."
+  ISO_OUT="$ISO_DIR/alpine-${ALPINE_VERSION}-cli-live.iso"
+
+  mkdir -p "$BUILD_DIR/iso_root/boot/grub"
+  cp -a "$BUILD_DIR/rootfs" "$BUILD_DIR/iso_root"
+
+  # Basic grub config
+  cat > "$BUILD_DIR/iso_root/boot/grub/grub.cfg" <<EOF
+set timeout=5
+menuentry "Alpine Linux CLI Live ($ALPINE_VERSION)" {
+    linux /boot/vmlinuz root=/dev/null console=tty0 console=ttyS0
+    initrd /boot/initramfs
 }
+EOF
 
-check_tool wget "wget --version | head -n1"
-check_tool 7z "7z | head -n2 | tail -n1"
-check_tool xorriso "xorriso -version | head -n1"
-check_tool tar "tar --version | head -n1"
-check_tool bash "bash --version | head -n1"
+  # Dummy kernel/initramfs (replace with actual ones if needed)
+  touch "$BUILD_DIR/iso_root/boot/vmlinuz"
+  touch "$BUILD_DIR/iso_root/boot/initramfs"
 
-WORKDIR="$(pwd)"
-OUTDIR="${WORKDIR}/alpine-${ALPINE_VERSION}"
-CACHEDIR="${WORKDIR}/.cache"
-ROOTFS="${OUTDIR}/rootfs"
-ISO_DIR="${OUTDIR}/iso"
-ISO_FILE="${WORKDIR}/alpine-${ALPINE_VERSION}-custom.iso"
-MIRROR="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64"
+  xorriso -as mkisofs \
+    -o "$ISO_OUT" \
+    -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+    -c boot.catalog \
+    -b boot/grub/grub.cfg \
+    -no-emul-boot \
+    -boot-load-size 4 \
+    -boot-info-table \
+    "$BUILD_DIR/iso_root"
 
-mkdir -p "${ROOTFS}"
-mkdir -p "${CACHEDIR}"
-
-echo "📥 Downloading apk.static and base packages..."
-
-APK_TOOLS_URL="${MIRROR}/apk-tools-static-2.12.10-r1.apk"
-BASE_TAR_URL="${MIRROR}/alpine-minirootfs-${ALPINE_VERSION}.0-x86_64.tar.gz"
-
-echo "🔗 ${APK_TOOLS_URL}"
-echo "🔗 ${BASE_TAR_URL}"
-
-cd "${CACHEDIR}"
-wget -N "${APK_TOOLS_URL}" || { echo "❌ Failed to download apk-tools"; exit 1; }
-wget -N "${BASE_TAR_URL}" || { echo "❌ Failed to download base rootfs"; exit 1; }
-
-cd "${ROOTFS}"
-tar -xzf "${CACHEDIR}/alpine-minirootfs-${ALPINE_VERSION}.0-x86_64.tar.gz"
-
-cd "${WORKDIR}"
-echo "✅ Root filesystem prepared at: ${ROOTFS}"
-
-if [ "${BUILD_ISO}" = "true" ]; then
-    echo "🚧 Preparing ISO structure..."
-
-    mkdir -p "${ISO_DIR}/boot"
-
-    echo "📥 Downloading kernel and initrd..."
-    wget -N "${MIRROR}/vmlinuz" -O "${ISO_DIR}/boot/vmlinuz" || echo "⚠️ Warning: Kernel file not found at ${MIRROR}/vmlinuz"
-    wget -N "${MIRROR}/initramfs" -O "${ISO_DIR}/boot/initramfs" || echo "⚠️ Warning: Initrd file not found at ${MIRROR}/initramfs"
-
-    echo "🛠️ Creating ISO image..."
-    xorriso \
-        -as mkisofs \
-        -iso-level 3 \
-        -full-iso9660-filenames \
-        -volid "ALPINE_LIVE" \
-        -output "${ISO_FILE}" \
-        -eltorito-boot boot/vmlinuz \
-        -eltorito-catalog boot/boot.cat \
-        -no-emul-boot \
-        -boot-load-size 4 \
-        -boot-info-table \
-        -eltorito-alt-boot \
-        -e boot/initramfs \
-        -no-emul-boot \
-        -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
-        -c boot/boot.cat \
-        -b boot/syslinux.bin \
-        -no-emul-boot \
-        -boot-load-size 4 \
-        -boot-info-table \
-        "${ISO_DIR}" || echo "⚠️ Failed to create ISO image!"
-
-    echo "✅ ISO image created at: ${ISO_FILE}"
+  echo "✅ ISO created at: $ISO_OUT"
+else
+  echo "ℹ️ Skipping ISO creation."
 fi
