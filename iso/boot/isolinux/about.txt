@@ -1,0 +1,7 @@
+[F4] About
+----------
+This is a minimal Alpine Linux Live ISO
+with multiple boot options and no graphical interface.
+
+Created by Dawid Bielecki 'dawciobiel' using GitHub Actions & PRoot.
+

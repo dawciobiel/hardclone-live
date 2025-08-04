@@ -1,0 +1,9 @@
+[F3] Rescue Shell
+-----------------
+Starts Alpine with no init process.
+Drops you into a basic shell (/bin/sh).
+
+Useful for:
+- Advanced recovery
+- Manual mount / chroot
+

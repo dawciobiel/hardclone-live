@@ -1,0 +1,14 @@
+[F1] General Help
+-----------------
+Use arrow keys to select an entry.
+
+Available modes:
+- Default boot
+- Copy to RAM (toram)
+- Rescue Shell
+- Debug mode
+- Boot from hard disk
+- Memtest
+
+Press [Enter] to boot the selected mode.
+

@@ -5,7 +5,7 @@ logs/
 
 # Output folder
 live-build/
-iso/
+output/
 
 # Backups
 2025-08-04_12-59_Alpine/

@@ -1,0 +1,7 @@
+[F6] Booting Tips
+-----------------
+- Use TAB to edit boot options.
+- 'toram' → loads system to RAM (no USB needed later).
+- 'nomodeset' → use for graphics issues.
+- 'init=/bin/sh' → rescue shell without init system.
+
