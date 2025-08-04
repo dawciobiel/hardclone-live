@@ -1,40 +1,39 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
+set -e
 
-ALPINE_VERSION="${1:-3.18}"
-USE_CACHE="${2:-false}"
-BUILD_ISO="${3:-true}"
+ALPINE_VERSION="$1"
+USE_CACHE="$2"
+BUILD_ISO="$3"
 
 echo "Using Alpine version: $ALPINE_VERSION"
 echo "Use cache: $USE_CACHE"
 echo "Build ISO: $BUILD_ISO"
 
-# --- Create workspace ---
-mkdir -p build
-cd build
-
-echo "Downloading Alpine minirootfs..."
-wget -q "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/alpine-minirootfs-${ALPINE_VERSION}.0-x86_64.tar.gz"
-
-echo "Downloading apk.static..."
+WORKDIR="$(pwd)/alpine-${ALPINE_VERSION}"
+CACHEDIR="$WORKDIR/cache"
+ISODIR="$WORKDIR/iso"
+ROOTFS_DIR="$WORKDIR/rootfs"
 APK_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/main/x86_64/apk.static"
-wget -q -O apk.static "$APK_URL"
+MINIROOTFS_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/alpine-minirootfs-${ALPINE_VERSION}.0-x86_64.tar.gz"
 
-# Check if it's really a binary
-if ! file apk.static | grep -q "ELF"; then
-    echo "❌ Error: apk.static not found or not a valid binary at $APK_URL"
+mkdir -p "$CACHEDIR" "$ISODIR" "$ROOTFS_DIR"
+
+echo "Checking if apk.static exists at: $APK_URL"
+if ! curl -sI "$APK_URL" | grep -q "200 OK"; then
+    echo "❌ Error: apk.static not found at $APK_URL (404)"
     exit 1
 fi
 
-chmod +x apk.static
+cd "$CACHEDIR"
 
-# --- Simulated build steps below ---
-echo "✅ apk.static verified"
-echo "➡️ You can now extract minirootfs, install packages etc."
+echo "Downloading Alpine minirootfs..."
+wget -N "$MINIROOTFS_URL"
 
-if [[ "$BUILD_ISO" == "true" ]]; then
-    echo "🔨 Building ISO (placeholder logic here)..."
-    # TODO: ISO build commands here
-else
-    echo "ℹ️ Skipping ISO build"
-fi
+echo "Downloading apk.static..."
+wget -N "$APK_URL"
+
+echo "✅ Downloads completed."
+
+# Here you can continue with further ISO creation logic
+# e.g., extract rootfs, configure, build ISO, etc.
+
