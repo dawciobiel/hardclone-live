@@ -19,9 +19,9 @@ jobs:
         id: cache-alpine
         with:
           path: alpine-minirootfs.tar.gz
-          key: alpine-minirootfs-${{ inputs.alpine-version || '3.19' }}-x86_64
+          key: alpine-minirootfs-3.19-x86_64
           restore-keys: |
-            alpine-minirootfs-${{ inputs.alpine-version || '3.19' }}-
+            alpine-minirootfs-3.19-
 
       - name: Build Alpine Linux Live CLI
         uses: ./
@@ -60,3 +60,4 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
