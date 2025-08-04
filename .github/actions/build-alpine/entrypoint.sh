@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -e
 
 ALPINE_VERSION="$1"
 USE_CACHE="$2"
@@ -9,79 +9,61 @@ echo "📦 Alpine version: $ALPINE_VERSION"
 echo "🗃️ Use cache: $USE_CACHE"
 echo "📀 Build ISO: $BUILD_ISO"
 
-WORKDIR="$(pwd)/work/v${ALPINE_VERSION}"
+WORKDIR="$(pwd)/work"
+ISODIR="$WORKDIR/iso"
 CACHEDIR="$WORKDIR/cache"
-ROOTFS="$WORKDIR/rootfs"
-ISODIR="$WORKDIR/isodir"
-OUT_ISO="alpine-${ALPINE_VERSION}-live.iso"
+OUTDIR="$(pwd)/out"
 
-mkdir -p "$CACHEDIR" "$ROOTFS" "$ISODIR/boot/grub"
+mkdir -p "$ISODIR" "$CACHEDIR" "$OUTDIR"
 
-MINIROOTFS_TAR="alpine-minirootfs-${ALPINE_VERSION}.0-x86_64.tar.gz"
-MINIROOTFS_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/${MINIROOTFS_TAR}"
+echo "📥 Downloading apk.static and base packages..."
 
-cd "$CACHEDIR"
+BASE_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/main/x86_64"
 
-# Download Alpine minirootfs
-if [[ "$USE_CACHE" != "true" || ! -f "$MINIROOTFS_TAR" ]]; then
-  echo "⬇️ Downloading Alpine minirootfs..."
-  wget -q --show-progress "$MINIROOTFS_URL"
+if [[ "$USE_CACHE" == "true" && -f "$CACHEDIR/apk.static" ]]; then
+    echo "✅ Using cached apk.static"
 else
-  echo "✅ Using cached minirootfs"
+    wget -q --show-progress "$BASE_URL/apk-tools-static-2.12.10-r3.apk" -O "$CACHEDIR/apk.apk"
+    tar -xzf "$CACHEDIR/apk.apk" -C "$CACHEDIR" sbin/apk.static
 fi
 
-# Extract root filesystem
-echo "📂 Extracting rootfs..."
-rm -rf "$ROOTFS"/*
-tar -xzf "$MINIROOTFS_TAR" -C "$ROOTFS"
-echo "✅ Rootfs ready at: $ROOTFS"
+echo "📦 Extracting minirootfs..."
+if [[ "$USE_CACHE" == "true" && -d "$CACHEDIR/rootfs" ]]; then
+    echo "✅ Using cached rootfs"
+    cp -a "$CACHEDIR/rootfs" "$ISODIR/rootfs"
+else
+    mkdir -p "$WORKDIR/rootfs"
+    "$CACHEDIR/sbin/apk.static" \
+        --root "$WORKDIR/rootfs" \
+        --repository "$BASE_URL" \
+        --initdb add alpine-base bash coreutils util-linux e2fsprogs parted mc nano python3
+    cp -a "$WORKDIR/rootfs" "$CACHEDIR/rootfs"
+    cp -a "$WORKDIR/rootfs" "$ISODIR/rootfs"
+fi
 
-# Install extra packages using proot
-echo "🔧 Installing CLI packages..."
-proot -R "$ROOTFS" apk update
-proot -R "$ROOTFS" apk add --no-cache bash util-linux e2fsprogs parted mc python3 sudo
+echo "🚧 Preparing ISO structure..."
+mkdir -p "$ISODIR/boot"
 
-# Create minimalist init
-cat > "$ROOTFS/init" <<'EOF'
-#!/bin/sh
-mount -t proc none /proc
-mount -t sysfs none /sys
-mount -t devtmpfs none /dev
-clear
-echo "Alpine Live CLI: logged in as root"
-export PS1="alpine~# "
-/bin/bash
-EOF
+echo "📥 Downloading official Alpine ISO..."
+ISO_NAME="alpine-standard-${ALPINE_VERSION}.0-x86_64.iso"
+wget -q --show-progress "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/${ISO_NAME}"
 
-chmod +x "$ROOTFS/init"
+echo "📂 Extracting kernel and initramfs from ISO using 7z..."
+mkdir -p "$WORKDIR/iso"
+7z x "$ISO_NAME" -o"$WORKDIR/iso" > /dev/null
+
+cp "$WORKDIR/iso/boot/vmlinuz-vanilla" "$ISODIR/boot/vmlinuz"
+cp "$WORKDIR/iso/boot/initramfs-vanilla" "$ISODIR/boot/initrd"
 
 if [[ "$BUILD_ISO" == "true" ]]; then
-  echo "🚧 Preparing ISO structure..."
-
-  cp -a "$ROOTFS"/* "$ISODIR/"
-  
-  echo "📥 Downloading kernel and initramfs..."
-  wget -q --show-progress "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/vmlinuz" -O "$ISODIR/boot/vmlinuz"
-  wget -q --show-progress "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/x86_64/initramfs" -O "$ISODIR/boot/initrd"
-
-  echo "⚙️ Creating GRUB config..."
-  cat > "$ISODIR/boot/grub/grub.cfg" <<EOF
-set timeout=5
-set default=0
-menuentry "Alpine Live CLI $ALPINE_VERSION" {
-  linux /boot/vmlinuz quiet
-  initrd /boot/initrd
-}
-EOF
-
-  echo "💿 Building ISO..."
-  xorriso -as mkisofs \
-    -output "$OUT_ISO" \
-    -volid ALPINE_LIVE_CLI \
-    -boot-grub2 \
-    "$ISODIR"
-
-  echo "✅ ISO created: $OUT_ISO"
+    echo "📀 Building custom ISO..."
+    mkisofs -o "$OUTDIR/alpine-custom.iso" \
+        -b boot/syslinux/isolinux.bin \
+        -c boot/syslinux/boot.cat \
+        -no-emul-boot -boot-load-size 4 -boot-info-table \
+        -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+        -J -R -V "ALPINE_CUSTOM" "$ISODIR"
+    echo "✅ ISO built: $OUTDIR/alpine-custom.iso"
 else
-  echo "🛑 Build ISO skipped"
+    echo "❌ Skipping ISO build"
 fi
