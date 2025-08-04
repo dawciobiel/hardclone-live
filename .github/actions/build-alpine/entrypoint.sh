@@ -1,5 +1,4 @@
-#!/usr/bin/env bash
-
+#!/bin/bash
 set -e
 
 ALPINE_VERSION="$1"
@@ -10,74 +9,47 @@ echo "📦 Alpine version: $ALPINE_VERSION"
 echo "🗃️ Use cache: $USE_CACHE"
 echo "📀 Build ISO: $BUILD_ISO"
 
-echo "🔍 Checking required tools..."
-
-check_tool() {
-    local tool="$1"
-    local version_cmd="$2"
-    if command -v "$tool" &> /dev/null; then
-        local version=$($version_cmd 2>&1 || true)
-        echo "✅ $tool found: $version"
-    else
-        echo "❌ $tool NOT found!"
-        MISSING_TOOL=true
-    fi
-}
-
-MISSING_TOOL=false
-check_tool wget "wget --version | head -n1"
-check_tool 7z "7z | head -n1"
-check_tool xorriso "xorriso --version | head -n1"
-check_tool tar "tar --version | head -n1"
-check_tool bash "bash --version | head -n1"
-check_tool proot "proot --version | head -n1"
-
-if [ "$MISSING_TOOL" = true ]; then
-    echo "❌ One or more required tools are missing. Exiting."
-    exit 1
-fi
-
-# Paths
-ROOT_DIR="$(pwd)"
-BUILD_DIR="$ROOT_DIR/build"
-CACHE_DIR="$ROOT_DIR/cache"
-ISO_DIR="$ROOT_DIR/iso"
-CONFIG_DIR="$ROOT_DIR/config"
-
-# Prepare dirs
-mkdir -p "$BUILD_DIR" "$CACHE_DIR" "$ISO_DIR"
-
-# Download minirootfs
-MINIROOTFS_URL="https://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/releases/x86_64/alpine-minirootfs-$ALPINE_VERSION.0-x86_64.tar.gz"
-MINIROOTFS_ARCHIVE="$CACHE_DIR/alpine-minirootfs.tar.gz"
-
-if [ "$USE_CACHE" != "true" ] || [ ! -f "$MINIROOTFS_ARCHIVE" ]; then
-    echo "⬇️ Downloading Alpine minirootfs..."
-    wget -O "$MINIROOTFS_ARCHIVE" "$MINIROOTFS_URL"
-else
-    echo "✅ Using cached Alpine minirootfs"
-fi
-
-# Extract rootfs
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/../../../" && pwd)"
+CONFIG_DIR="$REPO_DIR/config"
+BUILD_DIR="$REPO_DIR/build"
 ISO_ROOT="$BUILD_DIR/iso_root"
-rm -rf "$ISO_ROOT"
-mkdir -p "$ISO_ROOT"
-tar -xzf "$MINIROOTFS_ARCHIVE" -C "$ISO_ROOT"
+CACHE_DIR="$BUILD_DIR/cache"
+ISO_DIR="$REPO_DIR/iso"
 
-# Copy config files
+echo "🔍 Checking required tools..."
+for cmd in wget 7z xorriso tar bash proot; do
+    if ! command -v "$cmd" &> /dev/null; then
+        echo "❌ Required tool '$cmd' not found"
+        exit 1
+    fi
+    echo "✅ $cmd found: $(command -v $cmd)"
+done
+
+mkdir -p "$ISO_ROOT" "$CACHE_DIR" "$ISO_DIR"
+
+echo "⬇️ Downloading and extracting Alpine minirootfs..."
+ARCH="x86_64"
+CACHE_FILE="$CACHE_DIR/alpine-minirootfs-$ALPINE_VERSION-$ARCH.tar.gz"
+if [ "$USE_CACHE" != "true" ] || [ ! -f "$CACHE_FILE" ]; then
+    wget -O "$CACHE_FILE" "https://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/releases/$ARCH/alpine-minirootfs-$ALPINE_VERSION.0-$ARCH.tar.gz"
+fi
+tar -xzf "$CACHE_FILE" -C "$ISO_ROOT"
+
 echo "⚙️ Applying config..."
-cp -a "$CONFIG_DIR/." "$ISO_ROOT/"
+cp -rv "$CONFIG_DIR/"* "$ISO_ROOT/"
 
-# Chroot-like setup via proot
 echo "🔧 Customizing ISO root..."
-proot -R "$ISO_ROOT" /bin/sh -c "chmod +x /welcome.sh && ln -sf /welcome.sh /etc/profile"
+chmod +x "$ISO_ROOT/welcome.sh"
 
 if [ "$BUILD_ISO" = "true" ]; then
     echo "📦 Creating ISO image..."
 
-    # Set fallback path for isohdpfx.bin
-    BOOT_IMAGE="/usr/lib/ISOLINUX/isohdpfx.bin"
-    [[ -f "$BOOT_IMAGE" ]] || BOOT_IMAGE="/usr/lib/syslinux/isohdpfx.bin"
+    BOOT_IMAGE="$CACHE_DIR/isohdpfx.bin"
+    if [ ! -f "$BOOT_IMAGE" ]; then
+        echo "⬇️ Downloading isohdpfx.bin..."
+        wget -O "$BOOT_IMAGE" "https://git.kernel.org/pub/scm/boot/syslinux/syslinux.git/plain/mbr/isohdpfx.bin"
+    fi
 
     xorriso -as mkisofs \
         -o "$ISO_DIR/alpine-$ALPINE_VERSION-cli-live.iso" \
@@ -88,5 +60,3 @@ if [ "$BUILD_ISO" = "true" ]; then
         -V "ALPINE_LIVE" \
         "$ISO_ROOT"
 fi
-
-echo "✅ Build complete."
