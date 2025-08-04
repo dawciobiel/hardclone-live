@@ -18,7 +18,7 @@ CACHE_DIR="$BUILD_DIR/cache"
 ISO_DIR="$REPO_DIR/iso"
 
 echo "🔍 Checking required tools..."
-for cmd in wget 7z xorriso tar bash proot curl squashfs-tools p7zip-full wget; do
+for cmd in wget 7z xorriso tar bash proot curl mksquashfs; do
     if ! command -v "$cmd" &> /dev/null; then
         echo "❌ Required tool '$cmd' not found"
         exit 1
