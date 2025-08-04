@@ -27,7 +27,7 @@ jobs:
       - name: Install required packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget p7zip-full xorriso tar bash proot
+          sudo apt-get install -y wget p7zip-full xorriso tar bash proot curl squashfs-tools p7zip-full wget
 
       - name: Make entrypoint executable
         run: chmod +x "${{ github.workspace }}/.github/actions/build-alpine/entrypoint.sh"
