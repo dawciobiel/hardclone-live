@@ -1,0 +1,8 @@
+[F2] Debug Mode
+---------------
+Boots Alpine with full kernel logging and verbose init system.
+
+Useful for:
+- Troubleshooting boot issues
+- Diagnosing missing drivers
+
