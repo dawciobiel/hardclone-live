@@ -1,4 +1,4 @@
-name: 'Build Alpine Linux Live CLI'
+name: 'Build 7:38 Alpine Linux Live CLI'
 description: 'Builds a bootable Alpine Linux Live CLI distribution with Python, editors, and system tools'
 author: 'Alpine Live Builder'
 
@@ -309,9 +309,13 @@ runs:
         echo "Copying kernel..."
         sudo cp boot/vmlinuz-lts boot/vmlinuz-live 2>/dev/null || sudo cp boot/vmlinuz-* boot/vmlinuz-live
         
-        echo "Copying boot files to host..."
+        echo "Copying boot files to host with proper permissions..."
         sudo cp boot/vmlinuz-live ../
         sudo cp boot/initramfs-live ../
+        
+        # FIX: Change ownership to current user
+        sudo chown $USER:$USER ../vmlinuz-live
+        sudo chown $USER:$USER ../initramfs-live
         
         echo "Cleaning up mounts..."
         sudo umount dev/ proc/ sys/ || true
@@ -325,6 +329,9 @@ runs:
           -e boot/vmlinuz-live \
           -e boot/initramfs-live
         
+        # FIX: Change ownership of SquashFS file
+        sudo chown $USER:$USER alpine-live.squashfs
+        
         echo "SquashFS created: $(ls -lh alpine-live.squashfs)"
 
     - name: Create bootable ISO with UEFI support
@@ -334,6 +341,7 @@ runs:
         mkdir -p iso-build/{boot/grub,efi/boot,live}
         
         echo "Copying kernel and initramfs..."
+        # FIX: Files now have correct permissions
         cp vmlinuz-live iso-build/boot/
         cp initramfs-live iso-build/boot/
         
