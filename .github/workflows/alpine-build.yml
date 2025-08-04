@@ -25,7 +25,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up dependencies
-        run: sudo apt-get update && sudo apt-get install -y curl xorriso squashfs-tools proot
+        run: sudo apt-get update && sudo apt-get install -y curl xorriso squashfs-tools proot syslinux
 
       - name: Build ISO
         uses: ./.github/actions/build-alpine
