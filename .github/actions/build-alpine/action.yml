@@ -1,0 +1,29 @@
+name: Build Alpine ISO
+description: Build a Live ISO based on Alpine Linux
+inputs:
+  alpine-version:
+    description: 'Version of Alpine to use (e.g. 3.19)'
+    required: false
+    default: '3.19'
+  upload-artifacts:
+    description: 'Upload artifacts after build'
+    required: false
+    default: 'false'
+  use-cache:
+    description: 'Use cached minirootfs if available'
+    required: false
+    default: 'true'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Alpine build directories
+      shell: bash
+      run: |
+        chmod +x scripts/entrypoint.sh
+
+    - name: Run build script
+      shell: bash
+      run: |
+        ./scripts/entrypoint.sh "${{ inputs.alpine-version }}" "${{ inputs.upload-artifacts }}" "${{ inputs.use-cache }}"
+
