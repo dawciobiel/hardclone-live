@@ -48,7 +48,7 @@ if [ "$BUILD_ISO" = "true" ]; then
     BOOT_IMAGE="$CACHE_DIR/isohdpfx.bin"
     if [ ! -f "$BOOT_IMAGE" ]; then
         echo "⬇️ Downloading isohdpfx.bin..."
-        wget -O "$BOOT_IMAGE" "https://git.kernel.org/pub/scm/boot/syslinux/syslinux.git/plain/mbr/isohdpfx.bin"
+        wget -O "$BOOT_IMAGE" "https://gitlab.archlinux.org/archlinux/packaging/packages/syslinux/-/raw/main/mbr/isohdpfx.bin"
     fi
 
     xorriso -as mkisofs \
