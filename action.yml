@@ -1,4 +1,4 @@
-name: 'Build Alpine Live ISO'
+name: 'Build Alpine Live ISO 12:16'
 description: 'Create a minimal Alpine Linux Live ISO with CLI tools'
 inputs:
   alpine-version:
