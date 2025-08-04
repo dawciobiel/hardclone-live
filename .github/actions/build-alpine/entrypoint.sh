@@ -1,5 +1,5 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
 ALPINE_VERSION="$1"
 USE_CACHE="$2"
