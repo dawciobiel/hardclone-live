@@ -15,15 +15,9 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - run: |
-        echo "Current directory:"
-        pwd
-        echo "Contents:"
-        ls -lah
+    - run: echo "Current directory: $(pwd)"; ls -lah
       shell: bash
-
-    - run: chmod +x ./entrypoint.sh
+    - run: chmod +x ${{ github.action_path }}/entrypoint.sh
       shell: bash
-
-    - run: ./entrypoint.sh "${{ inputs.alpine-version }}" "${{ inputs.use-cache }}" "${{ inputs.build-iso }}"
+    - run: ${{ github.action_path }}/entrypoint.sh "${{ inputs.alpine-version }}" "${{ inputs.use-cache }}" "${{ inputs.build-iso }}"
       shell: bash
