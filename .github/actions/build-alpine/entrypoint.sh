@@ -5,12 +5,12 @@ set -e
 ALPINE_VERSION="$1"
 USE_CACHE="$2"
 BUILD_ISO="$3"
-OUTPUT_ISO_NAME="$4"
+OUTPUT_ISO_PATH="$4"
 
 echo "📦 Alpine version: $ALPINE_VERSION"
 echo "🗃️ Use cache: $USE_CACHE"
 echo "📀 Build ISO: $BUILD_ISO"
-echo "📝 Output ISO filename: $OUTPUT_ISO_NAME"
+echo "🛠️ Output ISO path: $OUTPUT_ISO_PATH"
 
 # Set up directory paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,10 +19,9 @@ CONFIG_DIR="$REPO_DIR/config"
 BUILD_DIR="$REPO_DIR/build"
 ISO_ROOT="$BUILD_DIR/iso_root"
 CACHE_DIR="$BUILD_DIR/cache"
-ISO_DIR="$REPO_DIR/iso"
 TOOLS_DIR="$REPO_DIR/tools"
 
-mkdir -p "$ISO_ROOT" "$CACHE_DIR" "$ISO_DIR"
+mkdir -p "$ISO_ROOT" "$CACHE_DIR" "$(dirname "$OUTPUT_ISO_PATH")"
 
 echo "🔍 Checking required tools..."
 for cmd in wget 7z xorriso tar bash proot curl mksquashfs; do
@@ -72,8 +71,10 @@ if [ "$BUILD_ISO" = "true" ]; then
     cp "$REPO_DIR/iso/boot/isolinux/menu.c32" "$SYSROOT/"
     cp "$REPO_DIR/iso/boot/isolinux/vesamenu.c32" "$SYSROOT/"
 
+    echo "Creating ISO file at: $OUTPUT_ISO_PATH"
+
     xorriso -as mkisofs \
-        -o "$ISO_DIR/$OUTPUT_ISO_NAME" \
+        -o "$OUTPUT_ISO_PATH" \
         -isohybrid-mbr "$BOOT_IMAGE" \
         -c boot/boot.cat \
         -no-emul-boot -boot-load-size 4 -boot-info-table \
@@ -81,5 +82,5 @@ if [ "$BUILD_ISO" = "true" ]; then
         -V "ALPINE_LIVE" \
         "$ISO_ROOT"
 
-    echo "✅ ISO image created: $ISO_DIR/$OUTPUT_ISO_NAME"
+    echo "✅ ISO image created: $OUTPUT_ISO_PATH"
 fi
