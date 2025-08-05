@@ -61,8 +61,8 @@ proot -R "$ISO_ROOT" /bin/sh -c '
     apk update
     
     echo "🔧 Installing base system..."
-    apk add alpine-base alpine-keys busybox busybox-initscripts openrc alpine-conf
-    apk add linux-lts linux-firmware
+    apk add alpine-base alpine-keys busybox openrc alpine-conf
+    apk add linux-lts linux-firmware mkinitfs
     
     echo "🌐 Installing network tools..."
     apk add chrony openssh curl wget rsync
@@ -78,7 +78,7 @@ proot -R "$ISO_ROOT" /bin/sh -c '
     apk add htop btop iotop
     apk add tmux screen
     apk add tree file
-    apk add grep sed awk
+    apk add grep sed gawk
     apk add tar gzip bzip2 xz
     apk add jq yq
     
@@ -115,47 +115,24 @@ proot -R "$ISO_ROOT" /bin/sh -c '
     apk add strace ltrace
     
     echo "⚙️ Setting up services..."
-    rc-update add devfs sysinit
-    rc-update add dmesg sysinit
-    rc-update add mdev sysinit
-    rc-update add hwdrivers sysinit
-    rc-update add modloop sysinit
-    rc-update add hwclock boot
-    rc-update add modules boot
-    rc-update add sysctl boot
-    rc-update add hostname boot
-    rc-update add bootmisc boot
-    rc-update add syslog boot
-    rc-update add networking boot
-    rc-update add local default
-    rc-update add chronyd default
-    rc-update add sshd default
-    rc-update add docker default
+    # Skip rc-update in proot - will be done at boot time
+    echo "Skipping service setup in proot environment"
     
     echo "👤 Setting up users..."
-    # Root password: alpine
-    echo "root:alpine" | chpasswd
-    
-    # Add liveuser to groups
-    addgroup liveuser wheel 2>/dev/null || true
-    addgroup liveuser docker 2>/dev/null || true
-    
-    # Configure sudo
-    echo "%wheel ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+    # Skip password changes in proot - will be done at boot time  
+    echo "Skipping user setup in proot environment"
 '
 
 echo "🏗️ Creating initramfs..."
 proot -R "$ISO_ROOT" /bin/sh -c '
-    if [ -f /usr/share/kernel/lts/kernel.release ]; then
-        mkinitfs -o /boot/initramfs-lts $(cat /usr/share/kernel/lts/kernel.release)
+    # Find kernel version
+    KERNEL_VERSION=$(ls /lib/modules/ 2>/dev/null | head -n1)
+    if [ -n "$KERNEL_VERSION" ]; then
+        echo "Found kernel version: $KERNEL_VERSION"
+        mkinitfs -o /boot/initramfs-lts $KERNEL_VERSION
+        echo "✅ Initramfs created"
     else
-        echo "⚠️ Kernel release file not found, trying alternative method..."
-        KERNEL_VERSION=$(ls /lib/modules/ | head -n1)
-        if [ -n "$KERNEL_VERSION" ]; then
-            mkinitfs -o /boot/initramfs-lts $KERNEL_VERSION
-        else
-            echo "❌ Could not determine kernel version"
-        fi
+        echo "❌ No kernel modules found"
     fi
 '
 
@@ -163,6 +140,39 @@ proot -R "$ISO_ROOT" /bin/sh -c '
 cat > "$ISO_ROOT/etc/local.d/live-boot.start" << 'EOF'
 #!/bin/sh
 echo "🚀 Setting up Alpine Live CLI environment..."
+
+# Setup services
+echo "⚙️ Setting up OpenRC services..."
+rc-update add devfs sysinit 2>/dev/null || true
+rc-update add dmesg sysinit 2>/dev/null || true  
+rc-update add mdev sysinit 2>/dev/null || true
+rc-update add hwdrivers sysinit 2>/dev/null || true
+rc-update add modloop sysinit 2>/dev/null || true
+rc-update add hwclock boot 2>/dev/null || true
+rc-update add modules boot 2>/dev/null || true
+rc-update add sysctl boot 2>/dev/null || true
+rc-update add hostname boot 2>/dev/null || true
+rc-update add bootmisc boot 2>/dev/null || true
+rc-update add syslog boot 2>/dev/null || true
+rc-update add networking boot 2>/dev/null || true
+rc-update add local default 2>/dev/null || true
+rc-update add chronyd default 2>/dev/null || true
+rc-update add sshd default 2>/dev/null || true
+rc-update add docker default 2>/dev/null || true
+
+# Setup users and passwords
+echo "👤 Setting up users..."
+echo "root:alpine" | chpasswd 2>/dev/null || true
+echo "liveuser:live" | chpasswd 2>/dev/null || true
+
+# Add liveuser to groups
+addgroup liveuser wheel 2>/dev/null || true
+addgroup liveuser docker 2>/dev/null || true
+
+# Configure sudo
+if ! grep -q "wheel.*NOPASSWD" /etc/sudoers; then
+    echo "%wheel ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+fi
 
 # Mount tmpfs for writable home
 if ! mountpoint -q /home; then
@@ -203,7 +213,7 @@ chown liveuser:liveuser /home/liveuser/.bashrc 2>/dev/null || true
 # Start Docker daemon if available
 if command -v dockerd >/dev/null 2>&1; then
     if ! pgrep dockerd > /dev/null; then
-        dockerd &
+        dockerd --data-root /tmp/docker &
     fi
 fi
 
