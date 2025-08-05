@@ -6,3 +6,7 @@ logs/
 # Output .iso folder
 artifacts/
 
+# tools
+scripts/content_of_files.sh
+scripts/content_of_files.log
+
