@@ -5,7 +5,7 @@ on:
     inputs:
       alpine_version:
         description: 'Alpine version'
-        required: false
+        required: true
         default: '3.20'
       use_cache:
         description: 'Use cache'
@@ -36,10 +36,11 @@ jobs:
         id: iso_name
         run: |
           TIMESTAMP=$(date -u +"%Y-%m-%d_%H-%M")
-          ALPINE_VERSION=${{ github.event.inputs.alpine_version }}
+          ALPINE_VERSION="${{ github.event.inputs.alpine_version }}"
           ISO_NAME="${TIMESTAMP}_alpine-${ALPINE_VERSION}-cli-live.iso"
+          ISO_PATH="${{ env.ISO_OUTPUT_DIR }}/${ISO_NAME}"
           echo "ISO_NAME=$ISO_NAME" >> "$GITHUB_OUTPUT"
-          echo "ISO_PATH=${{ env.ISO_OUTPUT_DIR }}/$ISO_NAME" >> "$GITHUB_OUTPUT"
+          echo "ISO_PATH=$ISO_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Make entrypoint executable
         run: chmod +x "${{ github.workspace }}/.github/actions/build-alpine/entrypoint.sh"
