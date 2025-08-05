@@ -47,29 +47,31 @@ fi
 # Extract Alpine base system
 tar -xzf "$CACHE_FILE" -C "$ISO_ROOT"
 
-echo "🔧 Installing packages in chroot..."
-# Bind mount /proc, /sys, /dev for chroot
-mount --bind /proc "$ISO_ROOT/proc"
-mount --bind /sys "$ISO_ROOT/sys"
-mount --bind /dev "$ISO_ROOT/dev"
+echo "⚙️ Applying configuration..."
+cp -rv "$CONFIG_DIR/"* "$ISO_ROOT/"
 
-# Install packages
-chroot "$ISO_ROOT" /bin/sh -c '
+echo "🔧 Customizing ISO root..."
+chmod +x "$ISO_ROOT/welcome.sh"
+
+echo "🔧 Installing packages using proot..."
+
+# Use proot instead of chroot (doesn't require root privileges)
+proot -R "$ISO_ROOT" /bin/sh -c '
     echo "📦 Updating package repository..."
     apk update
-
+    
     echo "🔧 Installing base system..."
     apk add alpine-base alpine-keys busybox busybox-initscripts openrc alpine-conf
     apk add linux-lts linux-firmware
-
+    
     echo "🌐 Installing network tools..."
     apk add chrony openssh curl wget rsync
-
+    
     echo "💻 Installing development tools..."
     apk add git python3 py3-pip
     apk add build-base gcc musl-dev
     apk add nodejs npm
-
+    
     echo "🛠️ Installing CLI utilities..."
     apk add bash zsh fish
     apk add nano vim micro
@@ -79,19 +81,19 @@ chroot "$ISO_ROOT" /bin/sh -c '
     apk add grep sed awk
     apk add tar gzip bzip2 xz
     apk add jq yq
-
+    
     echo "🐳 Installing Docker..."
     apk add docker docker-compose docker-cli-compose
-
+    
     echo "📊 Installing system monitoring..."
     apk add neofetch
     apk add lshw pciutils usbutils
     apk add iftop nethogs
-
+    
     echo "🔐 Installing security tools..."
     apk add sudo
     apk add gnupg
-
+    
     echo "📁 Installing file utilities..."
     apk add mc
     apk add zip unzip
@@ -111,7 +113,7 @@ chroot "$ISO_ROOT" /bin/sh -c '
     apk add stress-ng
     apk add sysstat
     apk add strace ltrace
-
+    
     echo "⚙️ Setting up services..."
     rc-update add devfs sysinit
     rc-update add dmesg sysinit
@@ -129,39 +131,86 @@ chroot "$ISO_ROOT" /bin/sh -c '
     rc-update add chronyd default
     rc-update add sshd default
     rc-update add docker default
-
+    
     echo "👤 Setting up users..."
     # Root password: alpine
     echo "root:alpine" | chpasswd
-
+    
     # Add liveuser to groups
-    addgroup liveuser wheel
-    addgroup liveuser docker
-
+    addgroup liveuser wheel 2>/dev/null || true
+    addgroup liveuser docker 2>/dev/null || true
+    
     # Configure sudo
     echo "%wheel ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 '
 
-# Cleanup mounts
-umount "$ISO_ROOT/dev" || true
-umount "$ISO_ROOT/sys" || true
-umount "$ISO_ROOT/proc" || true
-
 echo "🏗️ Creating initramfs..."
-chroot "$ISO_ROOT" /bin/sh -c "
-    mkinitfs -o /boot/initramfs-lts /usr/share/kernel/lts/kernel.release
-"
+proot -R "$ISO_ROOT" /bin/sh -c '
+    if [ -f /usr/share/kernel/lts/kernel.release ]; then
+        mkinitfs -o /boot/initramfs-lts $(cat /usr/share/kernel/lts/kernel.release)
+    else
+        echo "⚠️ Kernel release file not found, trying alternative method..."
+        KERNEL_VERSION=$(ls /lib/modules/ | head -n1)
+        if [ -n "$KERNEL_VERSION" ]; then
+            mkinitfs -o /boot/initramfs-lts $KERNEL_VERSION
+        else
+            echo "❌ Could not determine kernel version"
+        fi
+    fi
+'
 
-# Copy kernel and initramfs to boot directory
-mkdir -p "$ISO_ROOT/boot"
-cp "$ISO_ROOT/boot/vmlinuz-lts" "$ISO_ROOT/boot/" 2>/dev/null || true
-cp "$ISO_ROOT/boot/initramfs-lts" "$ISO_ROOT/boot/" 2>/dev/null || true
+# Create enhanced live boot script
+cat > "$ISO_ROOT/etc/local.d/live-boot.start" << 'EOF'
+#!/bin/sh
+echo "🚀 Setting up Alpine Live CLI environment..."
 
-echo "⚙️ Applying configuration..."
-cp -rv "$CONFIG_DIR/"* "$ISO_ROOT/"
+# Mount tmpfs for writable home
+if ! mountpoint -q /home; then
+    mount -t tmpfs -o size=512M tmpfs /home
+fi
 
-echo "🔧 Customizing ISO root..."
-chmod +x "$ISO_ROOT/welcome.sh"
+# Create live user home
+mkdir -p /home/liveuser
+chown liveuser:liveuser /home/liveuser 2>/dev/null || true
+
+# Create welcome script
+cat > /home/liveuser/.bashrc << 'BASHRC_EOF'
+export PS1='\[\033[01;32m\]liveuser@alpine-live\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+
+echo "🐧 Welcome to Alpine Linux Live CLI!"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Available tools:"
+echo "  • Development: git, python3, nodejs, docker, go, rust"  
+echo "  • Editors: nano, vim, micro"
+echo "  • Monitoring: htop, btop, iotop"
+echo "  • Network: wget, curl, ssh, nmap"
+echo "  • Security: wireshark, tcpdump"
+echo ""
+echo "Users:"
+echo "  • root (password: alpine)"
+echo "  • liveuser (password: live, sudo access)"
+echo ""
+echo "Services:"
+echo "  • SSH server running on port 22"
+echo "  • Docker daemon available"
+echo ""
+echo "Type 'neofetch' to see system info"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+BASHRC_EOF
+
+chown liveuser:liveuser /home/liveuser/.bashrc 2>/dev/null || true
+
+# Start Docker daemon if available
+if command -v dockerd >/dev/null 2>&1; then
+    if ! pgrep dockerd > /dev/null; then
+        dockerd &
+    fi
+fi
+
+echo "✅ Live environment setup complete!"
+EOF
+
+chmod +x "$ISO_ROOT/etc/local.d/live-boot.start"
 
 if [ "$BUILD_ISO" = "true" ]; then
     echo "📀 Creating ISO image..."
@@ -182,6 +231,21 @@ if [ "$BUILD_ISO" = "true" ]; then
     cp "$ISO_DIR/boot/isolinux/menu.c32" "$SYSROOT/"
     cp "$ISO_DIR/boot/isolinux/vesamenu.c32" "$SYSROOT/"
 
+    # Copy kernel and initramfs to ISO boot directory
+    if [ -f "$ISO_ROOT/boot/vmlinuz-lts" ]; then
+        cp "$ISO_ROOT/boot/vmlinuz-lts" "$ISO_ROOT/boot/"
+        echo "✅ Kernel copied"
+    else
+        echo "⚠️ Kernel not found at expected location"
+    fi
+    
+    if [ -f "$ISO_ROOT/boot/initramfs-lts" ]; then
+        cp "$ISO_ROOT/boot/initramfs-lts" "$ISO_ROOT/boot/"
+        echo "✅ Initramfs copied"
+    else
+        echo "⚠️ Initramfs not found at expected location"
+    fi
+
     echo "Creating ISO file at: $OUTPUT_ISO_PATH"
 
     xorriso -as mkisofs \
@@ -194,4 +258,10 @@ if [ "$BUILD_ISO" = "true" ]; then
         "$ISO_ROOT"
 
     echo "✅ ISO image created: $OUTPUT_ISO_PATH"
+    
+    # Show ISO size
+    if [ -f "$OUTPUT_ISO_PATH" ]; then
+        ISO_SIZE=$(du -h "$OUTPUT_ISO_PATH" | cut -f1)
+        echo "📊 ISO size: $ISO_SIZE"
+    fi
 fi
