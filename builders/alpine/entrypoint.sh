@@ -12,14 +12,14 @@ echo "🗃️ Use cache: $USE_CACHE"
 echo "📀 Build ISO: $BUILD_ISO"
 echo "🛠️ Output ISO path: $OUTPUT_ISO_PATH"
 
-# Set up directory paths
+# Set up directory paths (relative to current script)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-CONFIG_DIR="$REPO_DIR/config"
-BUILD_DIR="$REPO_DIR/build"
+CONFIG_DIR="$SCRIPT_DIR/config"
+TOOLS_DIR="$SCRIPT_DIR/tools"
+ISO_DIR="$SCRIPT_DIR/iso"
+BUILD_DIR="$SCRIPT_DIR/build"
 ISO_ROOT="$BUILD_DIR/iso_root"
 CACHE_DIR="$BUILD_DIR/cache"
-TOOLS_DIR="$REPO_DIR/tools"
 
 mkdir -p "$ISO_ROOT" "$CACHE_DIR" "$(dirname "$OUTPUT_ISO_PATH")"
 
@@ -33,7 +33,7 @@ for cmd in wget 7z xorriso tar bash proot curl mksquashfs; do
 done
 
 echo "📥 Using local Syslinux BIOS boot files..."
-cp "$REPO_DIR/tools/isohdpfx.bin" "$CACHE_DIR/isohdpfx.bin"
+cp "$TOOLS_DIR/isohdpfx.bin" "$CACHE_DIR/isohdpfx.bin"
 
 echo "⬇️ Downloading and extracting Alpine minirootfs..."
 ARCH="x86_64"
@@ -62,14 +62,15 @@ if [ "$BUILD_ISO" = "true" ]; then
         exit 1
     fi
 
-    # Ensure syslinux files are inside ISO root at boot/syslinux/
     SYSROOT="$ISO_ROOT/boot/syslinux"
     mkdir -p "$SYSROOT"
-    cp "$REPO_DIR/iso/boot/isolinux/isolinux.bin" "$SYSROOT/"
-    cp "$REPO_DIR/iso/boot/isolinux/ldlinux.c32" "$SYSROOT/"
-    cp "$REPO_DIR/iso/boot/isolinux/memdisk" "$SYSROOT/"
-    cp "$REPO_DIR/iso/boot/isolinux/menu.c32" "$SYSROOT/"
-    cp "$REPO_DIR/iso/boot/isolinux/vesamenu.c32" "$SYSROOT/"
+
+    # Copy syslinux boot files
+    cp "$ISO_DIR/boot/isolinux/isolinux.bin" "$SYSROOT/"
+    cp "$ISO_DIR/boot/isolinux/ldlinux.c32" "$SYSROOT/"
+    cp "$ISO_DIR/boot/isolinux/memdisk" "$SYSROOT/"
+    cp "$ISO_DIR/boot/isolinux/menu.c32" "$SYSROOT/"
+    cp "$ISO_DIR/boot/isolinux/vesamenu.c32" "$SYSROOT/"
 
     echo "Creating ISO file at: $OUTPUT_ISO_PATH"
 
