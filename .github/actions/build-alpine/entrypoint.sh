@@ -1,10 +1,10 @@
 #!/bin/bash
 set -e
 
-# Input parameters
-ALPINE_VERSION="$1"
-USE_CACHE="$2"
-BUILD_ISO="$3"
+# Default version if not provided
+ALPINE_VERSION="${1:-3.20}"
+USE_CACHE="${2:-true}"
+BUILD_ISO="${3:-true}"
 
 echo "📦 Alpine version: $ALPINE_VERSION"
 echo "🗃️ Use cache: $USE_CACHE"
@@ -34,16 +34,26 @@ done
 echo "📥 Using local Syslinux BIOS boot files..."
 cp "$REPO_DIR/tools/isohdpfx.bin" "$CACHE_DIR/isohdpfx.bin"
 
-echo "⬇️ Downloading and extracting Alpine minirootfs..."
 ARCH="x86_64"
 CACHE_FILE="$CACHE_DIR/alpine-minirootfs-$ALPINE_VERSION-$ARCH.tar.gz"
+
+echo "⬇️ Downloading and extracting Alpine minirootfs..."
 if [ "$USE_CACHE" != "true" ] || [ ! -f "$CACHE_FILE" ]; then
-    wget -O "$CACHE_FILE" "https://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/releases/$ARCH/alpine-minirootfs-$ALPINE_VERSION.0-$ARCH.tar.gz"
+    # Try with .0 suffix first
+    BASE_URL="https://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/releases/$ARCH"
+    FILE_NAME="alpine-minirootfs-$ALPINE_VERSION.0-$ARCH.tar.gz"
+
+    echo "🌐 Attempting download: $BASE_URL/$FILE_NAME"
+    if ! wget -O "$CACHE_FILE" "$BASE_URL/$FILE_NAME"; then
+        echo "⚠️ Failed to fetch .0 suffix, trying without suffix..."
+        FILE_NAME="alpine-minirootfs-$ALPINE_VERSION-$ARCH.tar.gz"
+        wget -O "$CACHE_FILE" "$BASE_URL/$FILE_NAME"
+    fi
 else
     echo "📦 Using cached minirootfs..."
 fi
 
-# Extract Alpine base system
+echo "📦 Extracting Alpine base system..."
 tar -xzf "$CACHE_FILE" -C "$ISO_ROOT"
 
 echo "⚙️ Applying configuration..."
