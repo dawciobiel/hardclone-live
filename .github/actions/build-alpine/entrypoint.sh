@@ -1,14 +1,16 @@
 #!/bin/bash
 set -e
 
-# Default version if not provided
-ALPINE_VERSION="${1:-3.20}"
-USE_CACHE="${2:-true}"
-BUILD_ISO="${3:-true}"
+# Input parameters
+ALPINE_VERSION="$1"
+USE_CACHE="$2"
+BUILD_ISO="$3"
+OUTPUT_ISO_NAME="$4"
 
 echo "📦 Alpine version: $ALPINE_VERSION"
 echo "🗃️ Use cache: $USE_CACHE"
 echo "📀 Build ISO: $BUILD_ISO"
+echo "📝 Output ISO filename: $OUTPUT_ISO_NAME"
 
 # Set up directory paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,26 +36,16 @@ done
 echo "📥 Using local Syslinux BIOS boot files..."
 cp "$REPO_DIR/tools/isohdpfx.bin" "$CACHE_DIR/isohdpfx.bin"
 
+echo "⬇️ Downloading and extracting Alpine minirootfs..."
 ARCH="x86_64"
 CACHE_FILE="$CACHE_DIR/alpine-minirootfs-$ALPINE_VERSION-$ARCH.tar.gz"
-
-echo "⬇️ Downloading and extracting Alpine minirootfs..."
 if [ "$USE_CACHE" != "true" ] || [ ! -f "$CACHE_FILE" ]; then
-    # Try with .0 suffix first
-    BASE_URL="https://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/releases/$ARCH"
-    FILE_NAME="alpine-minirootfs-$ALPINE_VERSION.0-$ARCH.tar.gz"
-
-    echo "🌐 Attempting download: $BASE_URL/$FILE_NAME"
-    if ! wget -O "$CACHE_FILE" "$BASE_URL/$FILE_NAME"; then
-        echo "⚠️ Failed to fetch .0 suffix, trying without suffix..."
-        FILE_NAME="alpine-minirootfs-$ALPINE_VERSION-$ARCH.tar.gz"
-        wget -O "$CACHE_FILE" "$BASE_URL/$FILE_NAME"
-    fi
+    wget -O "$CACHE_FILE" "https://dl-cdn.alpinelinux.org/alpine/v$ALPINE_VERSION/releases/$ARCH/alpine-minirootfs-$ALPINE_VERSION.0-$ARCH.tar.gz"
 else
     echo "📦 Using cached minirootfs..."
 fi
 
-echo "📦 Extracting Alpine base system..."
+# Extract Alpine base system
 tar -xzf "$CACHE_FILE" -C "$ISO_ROOT"
 
 echo "⚙️ Applying configuration..."
@@ -81,7 +73,7 @@ if [ "$BUILD_ISO" = "true" ]; then
     cp "$REPO_DIR/iso/boot/isolinux/vesamenu.c32" "$SYSROOT/"
 
     xorriso -as mkisofs \
-        -o "$ISO_DIR/alpine-$ALPINE_VERSION-cli-live.iso" \
+        -o "$ISO_DIR/$OUTPUT_ISO_NAME" \
         -isohybrid-mbr "$BOOT_IMAGE" \
         -c boot/boot.cat \
         -no-emul-boot -boot-load-size 4 -boot-info-table \
@@ -89,5 +81,5 @@ if [ "$BUILD_ISO" = "true" ]; then
         -V "ALPINE_LIVE" \
         "$ISO_ROOT"
 
-    echo "✅ ISO image created: $ISO_DIR/alpine-$ALPINE_VERSION-cli-live.iso"
+    echo "✅ ISO image created: $ISO_DIR/$OUTPUT_ISO_NAME"
 fi
