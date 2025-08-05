@@ -45,6 +45,17 @@ jobs:
       - name: Make entrypoint executable
         run: chmod +x "${{ github.workspace }}/.github/actions/build-alpine/entrypoint.sh"
 
+      - name: Prepare build files
+        run: |
+          mkdir -p "${{ github.workspace }}/.github/actions/build-alpine/tools"
+          cp "${{ github.workspace }}/builders/alpine/tools/isohdpfx.bin" "${{ github.workspace }}/.github/actions/build-alpine/tools/"
+          
+          mkdir -p "${{ github.workspace }}/.github/actions/build-alpine/config"
+          cp -r "${{ github.workspace }}/builders/alpine/config/"* "${{ github.workspace }}/.github/actions/build-alpine/config/"
+          
+          mkdir -p "${{ github.workspace }}/.github/actions/build-alpine/iso"
+          cp -r "${{ github.workspace }}/builders/alpine/iso/"* "${{ github.workspace }}/.github/actions/build-alpine/iso/"
+
       - name: Run Alpine ISO build script
         run: |
           "${{ github.workspace }}/.github/actions/build-alpine/entrypoint.sh" \
