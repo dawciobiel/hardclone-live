@@ -1,0 +1,49 @@
+#!/bin/sh
+# Live boot setup
+
+echo "🚀 Setting up Alpine Live CLI environment..."
+
+# Mount tmpfs for writable home
+if ! mountpoint -q /home; then
+    mount -t tmpfs -o size=512M tmpfs /home
+fi
+
+# Create live user home
+mkdir -p /home/liveuser
+chown liveuser:liveuser /home/liveuser
+
+# Create welcome script
+cat > /home/liveuser/.bashrc << 'EOF'
+# Alpine Live CLI Environment
+export PS1='\[\033[01;32m\]liveuser@alpine-live\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+
+echo "🐧 Welcome to Alpine Linux Live CLI!"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Available tools:"
+echo "  • Development: git, python3, nodejs, docker"  
+echo "  • Editors: nano, vim, micro"
+echo "  • Monitoring: htop, btop, iotop"
+echo "  • Network: wget, curl, ssh"
+echo "  • File management: mc, tree"
+echo ""
+echo "Users:"
+echo "  • root (password: alpine)"
+echo "  • liveuser (password: live, sudo access)"
+echo ""
+echo "Services:"
+echo "  • SSH server running on port 22"
+echo "  • Docker daemon available"
+echo ""
+echo "Type 'neofetch' to see system info"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+EOF
+
+chown liveuser:liveuser /home/liveuser/.bashrc
+
+# Start Docker daemon
+if ! pgrep dockerd > /dev/null; then
+    dockerd &
+fi
+
+# Display system info
+echo "✅ Live environment setup complete!"
