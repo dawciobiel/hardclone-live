@@ -47,6 +47,116 @@ fi
 # Extract Alpine base system
 tar -xzf "$CACHE_FILE" -C "$ISO_ROOT"
 
+echo "🔧 Installing packages in chroot..."
+# Bind mount /proc, /sys, /dev for chroot
+mount --bind /proc "$ISO_ROOT/proc"
+mount --bind /sys "$ISO_ROOT/sys"
+mount --bind /dev "$ISO_ROOT/dev"
+
+# Install packages
+chroot "$ISO_ROOT" /bin/sh -c '
+    echo "📦 Updating package repository..."
+    apk update
+
+    echo "🔧 Installing base system..."
+    apk add alpine-base alpine-keys busybox busybox-initscripts openrc alpine-conf
+    apk add linux-lts linux-firmware
+
+    echo "🌐 Installing network tools..."
+    apk add chrony openssh curl wget rsync
+
+    echo "💻 Installing development tools..."
+    apk add git python3 py3-pip
+    apk add build-base gcc musl-dev
+    apk add nodejs npm
+
+    echo "🛠️ Installing CLI utilities..."
+    apk add bash zsh fish
+    apk add nano vim micro
+    apk add htop btop iotop
+    apk add tmux screen
+    apk add tree file
+    apk add grep sed awk
+    apk add tar gzip bzip2 xz
+    apk add jq yq
+
+    echo "🐳 Installing Docker..."
+    apk add docker docker-compose docker-cli-compose
+
+    echo "📊 Installing system monitoring..."
+    apk add neofetch
+    apk add lshw pciutils usbutils
+    apk add iftop nethogs
+
+    echo "🔐 Installing security tools..."
+    apk add sudo
+    apk add gnupg
+
+    echo "📁 Installing file utilities..."
+    apk add mc
+    apk add zip unzip
+    apk add rsync
+
+    echo "🔥 Installing additional development tools..."
+    apk add go rust cargo
+    apk add php php-cli composer
+    apk add ruby ruby-dev
+
+    echo "🌐 Installing more network tools..."
+    apk add nmap masscan
+    apk add wireshark-common tcpdump
+    apk add bind-tools
+
+    echo "📈 Installing monitoring and performance tools..."
+    apk add stress-ng
+    apk add sysstat
+    apk add strace ltrace
+
+    echo "⚙️ Setting up services..."
+    rc-update add devfs sysinit
+    rc-update add dmesg sysinit
+    rc-update add mdev sysinit
+    rc-update add hwdrivers sysinit
+    rc-update add modloop sysinit
+    rc-update add hwclock boot
+    rc-update add modules boot
+    rc-update add sysctl boot
+    rc-update add hostname boot
+    rc-update add bootmisc boot
+    rc-update add syslog boot
+    rc-update add networking boot
+    rc-update add local default
+    rc-update add chronyd default
+    rc-update add sshd default
+    rc-update add docker default
+
+    echo "👤 Setting up users..."
+    # Root password: alpine
+    echo "root:alpine" | chpasswd
+
+    # Add liveuser to groups
+    addgroup liveuser wheel
+    addgroup liveuser docker
+
+    # Configure sudo
+    echo "%wheel ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+'
+
+# Cleanup mounts
+umount "$ISO_ROOT/dev" || true
+umount "$ISO_ROOT/sys" || true
+umount "$ISO_ROOT/proc" || true
+
+echo "🏗️ Creating initramfs..."
+chroot "$ISO_ROOT" /bin/sh -c "
+    mkinitfs -o /boot/initramfs-lts /usr/share/kernel/lts/kernel.release
+"
+
+# Copy kernel and initramfs to boot directory
+mkdir -p "$ISO_ROOT/boot"
+cp "$ISO_ROOT/boot/vmlinuz-lts" "$ISO_ROOT/boot/" 2>/dev/null || true
+cp "$ISO_ROOT/boot/initramfs-lts" "$ISO_ROOT/boot/" 2>/dev/null || true
+
 echo "⚙️ Applying configuration..."
 cp -rv "$CONFIG_DIR/"* "$ISO_ROOT/"
 
