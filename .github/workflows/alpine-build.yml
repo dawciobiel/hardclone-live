@@ -47,7 +47,7 @@ jobs:
             "${{ github.event.inputs.alpine_version }}" \
             "${{ github.event.inputs.use_cache }}" \
             "${{ github.event.inputs.build_iso }}" \
-            "${{ env.ISO_NAME }}"
+            "${{ steps.iso_name.outputs.ISO_NAME }}"
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
