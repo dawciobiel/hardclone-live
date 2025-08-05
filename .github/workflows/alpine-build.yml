@@ -20,6 +20,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      ISO_OUTPUT_DIR: ${{ github.workspace }}/iso
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,7 +30,16 @@ jobs:
       - name: Install required packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget p7zip-full xorriso tar bash proot curl squashfs-tools p7zip-full wget
+          sudo apt-get install -y wget p7zip-full xorriso tar bash proot curl squashfs-tools
+
+      - name: Generate dynamic ISO filename
+        id: iso_name
+        run: |
+          TIMESTAMP=$(date -u +"%Y-%m-%d_%H-%M")
+          ALPINE_VERSION=${{ github.event.inputs.alpine_version }}
+          ISO_NAME="${TIMESTAMP}_alpine-${ALPINE_VERSION}-cli-live.iso"
+          echo "ISO_NAME=$ISO_NAME" >> "$GITHUB_OUTPUT"
+          echo "ISO_PATH=${{ env.ISO_OUTPUT_DIR }}/$ISO_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Make entrypoint executable
         run: chmod +x "${{ github.workspace }}/.github/actions/build-alpine/entrypoint.sh"
@@ -37,4 +49,11 @@ jobs:
           "${{ github.workspace }}/.github/actions/build-alpine/entrypoint.sh" \
             "${{ github.event.inputs.alpine_version }}" \
             "${{ github.event.inputs.use_cache }}" \
-            "${{ github.event.inputs.build_iso }}"
+            "${{ github.event.inputs.build_iso }}" \
+            "${{ steps.iso_name.outputs.ISO_NAME }}"
+
+      - name: Upload ISO as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.iso_name.outputs.ISO_NAME }}
+          path: ${{ steps.iso_name.outputs.ISO_PATH }}
