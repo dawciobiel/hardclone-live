@@ -1,7 +1,6 @@
 alpine-base
 alpine-keys
 busybox
-busybox-initscripts
 openrc
 alpine-conf
 chrony
