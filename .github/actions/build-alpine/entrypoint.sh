@@ -256,6 +256,18 @@ if [ "$BUILD_ISO" = "true" ]; then
         exit 1
     fi
 
+    echo "🔧 Fixing file permissions..."
+    # Fix permissions issues before creating ISO
+    find "$ISO_ROOT" -type f -name "bbsuid" -delete 2>/dev/null || true
+    find "$ISO_ROOT" -type f -perm /u+s -exec chmod -s {} \; 2>/dev/null || true
+    find "$ISO_ROOT" -type d -exec chmod 755 {} \; 2>/dev/null || true
+    find "$ISO_ROOT" -type f -exec chmod 644 {} \; 2>/dev/null || true
+    find "$ISO_ROOT/bin" -type f -exec chmod 755 {} \; 2>/dev/null || true
+    find "$ISO_ROOT/sbin" -type f -exec chmod 755 {} \; 2>/dev/null || true
+    find "$ISO_ROOT/usr/bin" -type f -exec chmod 755 {} \; 2>/dev/null || true
+    find "$ISO_ROOT/usr/sbin" -type f -exec chmod 755 {} \; 2>/dev/null || true
+    echo "✅ File permissions fixed"
+
     echo "Creating ISO file at: $OUTPUT_ISO_PATH"
 
     xorriso -as mkisofs \
