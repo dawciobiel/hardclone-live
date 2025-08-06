@@ -241,19 +241,19 @@ if [ "$BUILD_ISO" = "true" ]; then
     cp "$ISO_DIR/boot/isolinux/menu.c32" "$SYSROOT/"
     cp "$ISO_DIR/boot/isolinux/vesamenu.c32" "$SYSROOT/"
 
-    # Copy kernel and initramfs to ISO boot directory
+    # Check if kernel and initramfs exist
     if [ -f "$ISO_ROOT/boot/vmlinuz-lts" ]; then
-        cp "$ISO_ROOT/boot/vmlinuz-lts" "$ISO_ROOT/boot/"
-        echo "✅ Kernel copied"
+        echo "✅ Kernel found: $ISO_ROOT/boot/vmlinuz-lts"
     else
-        echo "⚠️ Kernel not found at expected location"
+        echo "❌ Kernel not found at expected location"
+        exit 1
     fi
-    
+
     if [ -f "$ISO_ROOT/boot/initramfs-lts" ]; then
-        cp "$ISO_ROOT/boot/initramfs-lts" "$ISO_ROOT/boot/"
-        echo "✅ Initramfs copied"
+        echo "✅ Initramfs found: $ISO_ROOT/boot/initramfs-lts"
     else
-        echo "⚠️ Initramfs not found at expected location"
+        echo "❌ Initramfs not found at expected location"
+        exit 1
     fi
 
     echo "Creating ISO file at: $OUTPUT_ISO_PATH"
