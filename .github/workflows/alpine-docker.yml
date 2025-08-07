@@ -95,7 +95,7 @@ jobs:
           
           # Setup Syslinux
           echo "💿 Setting up bootloader..."
-          cat > "$ISO_ROOT/boot/syslinux/syslinux.cfg" << 'SYSLINUX_EOF'
+          cat > "\$ISO_ROOT/boot/syslinux/syslinux.cfg" << 'SYSLINUX_EOF'
           DEFAULT alpine
           LABEL alpine
           KERNEL /boot/vmlinuz-lts  
@@ -109,7 +109,7 @@ jobs:
           
           # Create live boot script
           echo "⚙️ Creating live environment setup..."
-          cat > "$ISO_ROOT/etc/local.d/live-boot.start" << 'LIVE_EOF'
+          cat > "\$ISO_ROOT/etc/local.d/live-boot.start" << 'LIVE_EOF'
           #!/bin/sh
           echo "🐧 Alpine Linux Live Environment"
           echo "Users: root/alpine, liveuser/live"
@@ -129,22 +129,22 @@ jobs:
           rc-service docker start 2>/dev/null || true
           LIVE_EOF
           
-          chmod +x "$ISO_ROOT/etc/local.d/live-boot.start"
+          chmod +x "\$ISO_ROOT/etc/local.d/live-boot.start"
           
           # Create ISO
           echo "📀 Creating ISO image..."
-          mkdir -p "$OUTPUT_DIR"
+          mkdir -p "\$OUTPUT_DIR"
           
-          xorriso -as mkisofs \
-              -o "$OUTPUT_DIR/alpine-live.iso" \
-              -c boot/boot.cat \
-              -no-emul-boot -boot-load-size 4 -boot-info-table \
-              -b boot/syslinux/isolinux.bin \
-              -V "ALPINE_LIVE_DOCKER" \
-              "$ISO_ROOT"
+          xorriso -as mkisofs \\
+              -o "\$OUTPUT_DIR/alpine-live.iso" \\
+              -c boot/boot.cat \\
+              -no-emul-boot -boot-load-size 4 -boot-info-table \\
+              -b boot/syslinux/isolinux.bin \\
+              -V "ALPINE_LIVE_DOCKER" \\
+              "\$ISO_ROOT"
           
           echo "✅ ISO created successfully!"
-          ls -lh "$OUTPUT_DIR"
+          ls -lh "\$OUTPUT_DIR"
           SCRIPT_EOF
           
           chmod +x /build/build-iso.sh
