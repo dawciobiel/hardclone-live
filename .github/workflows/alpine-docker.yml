@@ -134,7 +134,7 @@ jobs:
           RUN apk update && apk add --no-cache \
               bash curl wget tar gzip \
               xorriso squashfs-tools \
-              cdrkit syslinux \
+              syslinux \
               linux-lts linux-firmware mkinitfs \
               alpine-base alpine-keys busybox openrc alpine-conf \
               git python3 py3-pip nodejs npm \
