@@ -31,33 +31,9 @@ jobs:
           ISO_NAME="${TIMESTAMP}_alpine-${ALPINE_VERSION}-docker-live.iso"
           echo "ISO_NAME=$ISO_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Create Dockerfile for Alpine ISO build
+      - name: Create build script
         run: |
-          cat > Dockerfile << 'EOF'
-          FROM alpine:${{ github.event.inputs.alpine_version }}
-          
-          # Install required tools
-          RUN apk update && apk add --no-cache \
-              bash curl wget tar gzip \
-              xorriso squashfs-tools \
-              cdrkit syslinux \
-              linux-lts linux-firmware mkinitfs \
-              alpine-base alpine-keys busybox openrc alpine-conf \
-              git python3 py3-pip nodejs npm \
-              build-base gcc musl-dev go rust cargo \
-              php php-cli composer ruby ruby-dev \
-              nano vim micro htop btop iotop \
-              tmux screen tree file grep sed gawk \
-              zip unzip jq docker docker-compose \
-              neofetch lshw pciutils usbutils \
-              nmap wireshark-common tcpdump bind-tools \
-              sudo gnupg mc rsync \
-              stress-ng sysstat strace ltrace
-          
-          WORKDIR /build
-          
-          # Create build script
-          RUN cat > /build/build-iso.sh << 'SCRIPT_EOF'
+          cat > build-iso.sh << 'EOF'
           #!/bin/bash
           set -e
           
@@ -93,15 +69,15 @@ jobs:
               mkinitfs -o "$ISO_ROOT/boot/initramfs-lts" $(ls /lib/modules/ | head -n1)
           fi
           
-          # Setup Syslinux
+          # Setup Syslinux config
           echo "💿 Setting up bootloader..."
-          cat > "\$ISO_ROOT/boot/syslinux/syslinux.cfg" << 'SYSLINUX_EOF'
+          cat > "$ISO_ROOT/boot/syslinux/syslinux.cfg" << 'SYSLINUX_END'
           DEFAULT alpine
           LABEL alpine
           KERNEL /boot/vmlinuz-lts  
           INITRD /boot/initramfs-lts
           APPEND root=/dev/ram0 initrd=/boot/initramfs-lts rw quiet
-          SYSLINUX_EOF
+          SYSLINUX_END
           
           # Copy syslinux files
           cp /usr/share/syslinux/isolinux.bin "$ISO_ROOT/boot/syslinux/" 2>/dev/null || true
@@ -109,7 +85,7 @@ jobs:
           
           # Create live boot script
           echo "⚙️ Creating live environment setup..."
-          cat > "\$ISO_ROOT/etc/local.d/live-boot.start" << 'LIVE_EOF'
+          cat > "$ISO_ROOT/etc/local.d/live-boot.start" << 'LIVE_END'
           #!/bin/sh
           echo "🐧 Alpine Linux Live Environment"
           echo "Users: root/alpine, liveuser/live"
@@ -127,27 +103,56 @@ jobs:
           rc-service networking start 2>/dev/null || true
           rc-service sshd start 2>/dev/null || true
           rc-service docker start 2>/dev/null || true
-          LIVE_EOF
+          LIVE_END
           
-          chmod +x "\$ISO_ROOT/etc/local.d/live-boot.start"
+          chmod +x "$ISO_ROOT/etc/local.d/live-boot.start"
           
           # Create ISO
           echo "📀 Creating ISO image..."
-          mkdir -p "\$OUTPUT_DIR"
+          mkdir -p "$OUTPUT_DIR"
           
-          xorriso -as mkisofs \\
-              -o "\$OUTPUT_DIR/alpine-live.iso" \\
-              -c boot/boot.cat \\
-              -no-emul-boot -boot-load-size 4 -boot-info-table \\
-              -b boot/syslinux/isolinux.bin \\
-              -V "ALPINE_LIVE_DOCKER" \\
-              "\$ISO_ROOT"
+          xorriso -as mkisofs \
+              -o "$OUTPUT_DIR/alpine-live.iso" \
+              -c boot/boot.cat \
+              -no-emul-boot -boot-load-size 4 -boot-info-table \
+              -b boot/syslinux/isolinux.bin \
+              -V "ALPINE_LIVE_DOCKER" \
+              "$ISO_ROOT"
           
           echo "✅ ISO created successfully!"
-          ls -lh "\$OUTPUT_DIR"
-          SCRIPT_EOF
+          ls -lh "$OUTPUT_DIR"
+          EOF
           
-          chmod +x /build/build-iso.sh
+          chmod +x build-iso.sh
+
+      - name: Create Dockerfile
+        run: |
+          cat > Dockerfile << 'EOF'
+          FROM alpine:${{ github.event.inputs.alpine_version }}
+          
+          # Install required tools
+          RUN apk update && apk add --no-cache \
+              bash curl wget tar gzip \
+              xorriso squashfs-tools \
+              cdrkit syslinux \
+              linux-lts linux-firmware mkinitfs \
+              alpine-base alpine-keys busybox openrc alpine-conf \
+              git python3 py3-pip nodejs npm \
+              build-base gcc musl-dev go rust cargo \
+              php php-cli composer ruby ruby-dev \
+              nano vim micro htop btop iotop \
+              tmux screen tree file grep sed gawk \
+              zip unzip jq docker docker-compose \
+              neofetch lshw pciutils usbutils \
+              nmap wireshark-common tcpdump bind-tools \
+              sudo gnupg mc rsync \
+              stress-ng sysstat strace ltrace
+          
+          WORKDIR /build
+          
+          # Copy build script
+          COPY build-iso.sh /build/
+          RUN chmod +x /build/build-iso.sh
           EOF
 
       - name: Build Alpine Live ISO in Docker
