@@ -1,53 +1,71 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 
-# Ustawienia
-PROFILE_NAME="custom-alpine"
-ARTIFACTS_DIR="/workspace/artifacts/alpine"
+ISO_ROOT="./iso-root"
+APK_VER="v3.20"
 
-# Tworzenie katalogów
-mkdir -p "$ARTIFACTS_DIR"
-mkdir -p "./iso-root/root"
+echo "[1/6] Przygotowanie struktury rootfs..."
+mkdir -p "$ISO_ROOT/etc/apk/keys"
+mkdir -p "$ISO_ROOT/etc/apk"
 
-# Kopiowanie aplikacji
-cp /workspace/builders/alpine-v2/app.py ./iso-root/root/
+echo "[2/6] Kopiowanie kluczy Alpine..."
+cp -r /etc/apk/keys/* "$ISO_ROOT/etc/apk/keys/"
 
-# Utworzenie katalogu etc/apk i dodanie repozytorium
-mkdir -p ./iso-root/etc/apk
-echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > ./iso-root/etc/apk/repositories
-echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> ./iso-root/etc/apk/repositories
+echo "[3/6] Konfiguracja repozytoriów..."
+cat > "$ISO_ROOT/etc/apk/repositories" <<EOF
+https://dl-cdn.alpinelinux.org/alpine/${APK_VER}/main
+https://dl-cdn.alpinelinux.org/alpine/${APK_VER}/community
+EOF
 
-# Instalacja minimalnego Alpine w katalogu iso-root
-apk --root ./iso-root --initdb add alpine-base python3 py3-pip
+echo "[4/6] Instalacja systemu bazowego i pakietów..."
+apk --root "$ISO_ROOT" --initdb add \
+    alpine-base \
+    python3 \
+    py3-pip \
+    docker \
+    openrc \
+    grub \
+    grub-efi \
+    syslinux \
+    mtools
 
-# Dodanie GRUB i ustawień bootowania
-mkdir -p ./iso-root/boot/grub
-cat > ./iso-root/boot/grub/grub.cfg <<EOF
-set default=0
+echo "[5/6] Dodawanie aplikacji..."
+mkdir -p "$ISO_ROOT/opt/myapp"
+cp /workspace/builders/alpine-v2/app.py "$ISO_ROOT/opt/myapp/"
+
+cat > "$ISO_ROOT/usr/local/bin/start-myapp.sh" <<'EOF'
+#!/bin/sh
+echo "Uruchamiam aplikację..."
+python3 /opt/myapp/app.py
+EOF
+chmod +x "$ISO_ROOT/usr/local/bin/start-myapp.sh"
+
+# Dodaj do OpenRC, aby uruchamiał się po starcie
+cat > "$ISO_ROOT/etc/local.d/start-myapp.start" <<'EOF'
+#!/bin/sh
+/usr/local/bin/start-myapp.sh
+EOF
+chmod +x "$ISO_ROOT/etc/local.d/start-myapp.start"
+
+echo "[6/6] Tworzenie obrazu ISO..."
+mkdir -p iso-boot/boot/grub
+
+# Konfiguracja GRUB dla BIOS + UEFI
+cat > iso-boot/boot/grub/grub.cfg <<'EOF'
 set timeout=5
+set default=0
 
-menuentry "Custom Alpine Live" {
-    linux /boot/vmlinuz root=/dev/ram0 alpine_dev=LABEL=ALPINE_LIVE modules=loop,squashfs,sd-mod,usb-storage quiet
-    initrd /boot/initramfs
+menuentry "Alpine Live with MyApp" {
+    linux /boot/vmlinuz-lts root=/dev/ram0 alpine_dev=UUID=xxxxxxx modules=loop,squashfs,sd-mod,usb-storage quiet
+    initrd /boot/initramfs-lts
 }
 EOF
 
-# Pobranie jądra Alpine
-wget -O ./iso-root/boot/vmlinuz https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/netboot/vmlinuz-lts
-wget -O ./iso-root/boot/initramfs https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/netboot/initramfs-lts
+# Kopiowanie kernela i initramfs
+cp "$ISO_ROOT"/boot/vmlinuz-lts iso-boot/boot/
+cp "$ISO_ROOT"/boot/initramfs-lts iso-boot/boot/
 
-# Utworzenie pliku ISO
-xorriso -as mkisofs \
-  -iso-level 3 \
-  -full-iso9660-filenames \
-  -volid "ALPINE_LIVE" \
-  -eltorito-boot boot/grub/i386-pc/eltorito.img \
-  -no-emul-boot -boot-load-size 4 -boot-info-table \
-  -eltorito-alt-boot \
-  -e boot/grub/efi.img \
-  -no-emul-boot \
-  -isohybrid-gpt-basdat \
-  -output "$ARTIFACTS_DIR/${PROFILE_NAME}.iso" \
-  ./iso-root
+# Tworzenie ISO
+grub-mkrescue -o alpine-live.iso iso-boot
 
-echo "ISO gotowe: $ARTIFACTS_DIR/${PROFILE_NAME}.iso"
+echo "Gotowe! Obraz zapisany jako alpine-live.iso"
