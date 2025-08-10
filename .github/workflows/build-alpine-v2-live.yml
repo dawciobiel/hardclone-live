@@ -1,4 +1,4 @@
-name: Build Alpine Live Python ISO
+name: Build Alpine v2 Live Python ISO
 
 on:
   workflow_dispatch:
