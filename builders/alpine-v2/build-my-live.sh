@@ -12,6 +12,11 @@ mkdir -p "./iso-root/root"
 # Kopiowanie aplikacji
 cp /workspace/builders/alpine-v2/app.py ./iso-root/root/
 
+# Utworzenie katalogu etc/apk i dodanie repozytorium
+mkdir -p ./iso-root/etc/apk
+echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/main" > ./iso-root/etc/apk/repositories
+echo "https://dl-cdn.alpinelinux.org/alpine/v3.20/community" >> ./iso-root/etc/apk/repositories
+
 # Instalacja minimalnego Alpine w katalogu iso-root
 apk --root ./iso-root --initdb add alpine-base python3 py3-pip
 
