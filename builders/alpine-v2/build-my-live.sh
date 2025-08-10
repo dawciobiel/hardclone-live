@@ -1,75 +1,123 @@
 #!/bin/sh
 set -euo pipefail
 
-# builders/alpine-v2/build-my-live.sh
-# Tworzy minimalne Alpine Live ISO przy pomocy mkimage.sh
-# - ISO trafia do /workspace/artifacts/alpine/
-# - app.py kopiowany z /workspace/builders/alpine-v2/app.py
-
+WORKDIR=/workspace
+ISO_ROOT="$WORKDIR/iso-root"
+ISO_BUILD="$WORKDIR/iso-build"
+ARTIFACTS_DIR="$WORKDIR/artifacts/alpine"
+APP_DIR="$ISO_ROOT/opt/myapp"
+KERNEL_VERSION="6.4.13-virt"
 ALPINE_VERSION="v3.20"
 ARCH="x86_64"
-PROFILE="my-python-live"
-OUTDIR="/workspace/artifacts/alpine"
-PROFILES_DIR="./profiles"
 
-echo "[0] Working dir: $(pwd)"
 echo "[1] Przygotowanie katalogów..."
-mkdir -p "$OUTDIR"
-mkdir -p "$PROFILES_DIR/$PROFILE/airootfs/root"
+rm -rf "$ISO_ROOT" "$ISO_BUILD" "$ARTIFACTS_DIR"
+mkdir -p "$ISO_ROOT" "$ISO_BUILD/boot" "$ARTIFACTS_DIR" "$APP_DIR"
 
-# Pobierz mkimage.sh jeśli nie ma
-if [ ! -f ./mkimage.sh ]; then
-  echo "[2] Pobieram mkimage.sh..."
-  wget -q -O mkimage.sh "https://gitlab.alpinelinux.org/alpine/mkimage/-/raw/master/mkimage.sh"
-  chmod +x mkimage.sh
-fi
-
-# Utwórz plik packages dla profilu
-echo "[3] Tworzenie listy pakietów profilu..."
-cat > "$PROFILES_DIR/$PROFILE/packages" <<EOF
-alpine-base
-python3
-py3-pip
-bash
-openrc
+echo "[2] Bootstrap Alpine rootfs..."
+mkdir -p "$ISO_ROOT/etc/apk/keys"
+cp -r /etc/apk/keys/* "$ISO_ROOT/etc/apk/keys"
+cat > "$ISO_ROOT/etc/apk/repositories" <<EOF
+https://dl-cdn.alpinelinux.org/alpine/$ALPINE_VERSION/main
+https://dl-cdn.alpinelinux.org/alpine/$ALPINE_VERSION/community
 EOF
 
-# Skopiuj aplikację (jeśli nie ma, utwórz prosty placeholder)
-echo "[4] Kopiowanie app.py do profilu..."
-if [ -f /workspace/builders/alpine-v2/app.py ]; then
-  cp /workspace/builders/alpine-v2/app.py "$PROFILES_DIR/$PROFILE/airootfs/root/"
-else
-  cat > "$PROFILES_DIR/$PROFILE/airootfs/root/app.py" <<'PY'
-print("Hello from Live Python app (placeholder)!")
-PY
-fi
+apk --root "$ISO_ROOT" --initdb add alpine-base python3 py3-pip openrc bash
 
-# Dodaj skrypt autostartowy w local.d (OpenRC local service)
-echo "[5] Dodawanie autostartu (local.d)..."
-mkdir -p "$PROFILES_DIR/$PROFILE/airootfs/etc/local.d"
-cat > "$PROFILES_DIR/$PROFILE/airootfs/etc/local.d/start-myapp.start" <<'EOF'
+echo "[3] Kopiowanie aplikacji..."
+cp "$WORKDIR/builders/alpine-v2/app.py" "$APP_DIR"
+
+echo "[4] Tworzenie skryptu startowego aplikacji..."
+cat > "$ISO_ROOT/usr/local/bin/start-myapp.sh" <<'EOF'
 #!/bin/sh
-# delay small amount to let system settle
-sleep 1
-echo "Uruchamiam /root/app.py..."
-/usr/bin/python3 /root/app.py
+echo "Uruchamiam aplikację Python..."
+python3 /opt/myapp/app.py
 EOF
-chmod +x "$PROFILES_DIR/$PROFILE/airootfs/etc/local.d/start-myapp.start"
+chmod +x "$ISO_ROOT/usr/local/bin/start-myapp.sh"
 
-# Upewnij się, że lokalny skrypt zostanie uruchomiony (link w runlevels)
-mkdir -p "$PROFILES_DIR/$PROFILE/airootfs/etc/runlevels/default"
-ln -sf /etc/init.d/local "$PROFILES_DIR/$PROFILE/airootfs/etc/runlevels/default/local" || true
+# Autostart przez OpenRC local.d
+mkdir -p "$ISO_ROOT/etc/local.d"
+cat > "$ISO_ROOT/etc/local.d/start-myapp.start" <<'EOF'
+#!/bin/sh
+/usr/local/bin/start-myapp.sh
+EOF
+chmod +x "$ISO_ROOT/etc/local.d/start-myapp.start"
 
-# Uruchom mkimage.sh
-echo "[6] Wywołanie mkimage.sh (to może potrwać kilka minut)..."
-./mkimage.sh \
-  --tag "$ALPINE_VERSION" \
-  --arch "$ARCH" \
-  --repository "http://dl-cdn.alpinelinux.org/alpine/$ALPINE_VERSION/main" \
-  --repository "http://dl-cdn.alpinelinux.org/alpine/$ALPINE_VERSION/community" \
-  --outdir "$OUTDIR" \
-  --profile "$PROFILE"
+# Dodaj local do domyślnego runlevel
+ln -sf /etc/init.d/local "$ISO_ROOT/etc/runlevels/default/local"
 
-echo "[7] Build zakończony. Zawartość katalogu $OUTDIR:"
-ls -lah "$OUTDIR" || true
-echo "Gotowe. Pobierz ISO z artefaktów GitHub Actions (artifacts/alpine/*.iso)"
+echo "[5] Pobieranie kernela i initramfs Alpine..."
+cd "$ISO_BUILD"
+
+wget -q https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/linux-$KERNEL_VERSION.apk
+wget -q https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/initramfs-$KERNEL_VERSION.apk
+
+mkdir -p kernel_tmp
+tar -xf linux-$KERNEL_VERSION.apk -C kernel_tmp
+cp kernel_tmp/boot/vmlinuz-virt ./vmlinuz
+
+rm -rf kernel_tmp
+mkdir -p initramfs_tmp
+tar -xf initramfs-$KERNEL_VERSION.apk -C initramfs_tmp
+cp initramfs_tmp/boot/initramfs-virt ./initramfs
+
+rm -rf kernel_tmp initramfs_tmp linux-$KERNEL_VERSION.apk initramfs-$KERNEL_VERSION.apk
+
+echo "[6] Tworzenie obrazu squashfs z rootfs..."
+mksquashfs "$ISO_ROOT" "$ISO_BUILD/rootfs.squashfs" -comp xz -no-progress -noappend
+
+echo "[7] Przygotowanie katalogu ISO boot..."
+mkdir -p "$ISO_BUILD/iso/boot/grub"
+
+cp ./vmlinuz "$ISO_BUILD/iso/boot/"
+cp ./initramfs "$ISO_BUILD/iso/boot/"
+
+echo "set default=0
+set timeout=5
+
+menuentry \"Alpine Linux Live with Python App\" {
+    linux /boot/vmlinuz root=live:CDLABEL=ALPINE_ISO modules=loop,squashfs,sd-mod,usb-storage quiet
+    initrd /boot/initramfs
+}
+" > "$ISO_BUILD/iso/boot/grub/grub.cfg"
+
+echo "[8] Instalacja GRUB BIOS..."
+grub-install --target=i386-pc --boot-directory="$ISO_BUILD/iso/boot" --modules="part_msdos part_gpt" --recheck --force /dev/null
+
+echo "[9] Instalacja GRUB UEFI..."
+mkdir -p "$ISO_BUILD/iso/EFI/BOOT"
+grub-install --target=x86_64-efi --efi-directory="$ISO_BUILD/iso" --boot-directory="$ISO_BUILD/iso/boot" --removable --recheck
+
+echo "[10] Tworzenie pliku isolinux.cfg dla BIOS..."
+mkdir -p "$ISO_BUILD/iso/boot/syslinux"
+cat > "$ISO_BUILD/iso/boot/syslinux/isolinux.cfg" <<EOF
+UI menu.c32
+PROMPT 0
+MENU TITLE Alpine Live Boot Menu
+TIMEOUT 50
+DEFAULT linux
+
+LABEL linux
+    KERNEL /boot/vmlinuz
+    APPEND root=live:CDLABEL=ALPINE_ISO modules=loop,squashfs,sd-mod,usb-storage quiet
+    INITRD /boot/initramfs
+EOF
+
+echo "[11] Tworzenie ISO..."
+xorriso -as mkisofs \
+  -iso-level 3 \
+  -o "$ARTIFACTS_DIR/alpine-live.iso" \
+  -full-iso9660-filenames \
+  -volid "ALPINE_ISO" \
+  -eltorito-boot boot/grub/i386-pc/eltorito.img \
+  -eltorito-catalog boot/grub/boot.cat \
+  -no-emul-boot \
+  -boot-load-size 4 \
+  -boot-info-table \
+  --eltorito-alt-boot \
+  -e boot/efi.img \
+  -no-emul-boot \
+  -isohybrid-gpt-basdat \
+  "$ISO_BUILD/iso"
+
+echo "Gotowe! ISO zapisane w $ARTIFACTS_DIR/alpine-live.iso"
