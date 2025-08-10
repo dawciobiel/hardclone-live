@@ -53,4 +53,54 @@ cp "$ISO_ROOT/boot/initramfs-virt" "$ISO_BUILD/iso/boot/initramfs"
 echo "[7] Tworzenie obrazu squashfs z rootfs..."
 mksquashfs "$ISO_ROOT" "$ISO_BUILD/iso/rootfs.squashfs" -comp xz -no-progress -noappend
 
-echo "[8] Tworzenie pliku grub.cfg..
+echo "[8] Tworzenie pliku grub.cfg..."
+cat > "$ISO_BUILD/iso/boot/grub/grub.cfg" <<EOF
+set default=0
+set timeout=5
+
+menuentry "Alpine Linux Live with Python App" {
+    linux /boot/vmlinuz root=live:CDLABEL=ALPINE_ISO modules=loop,squashfs,sd-mod,usb-storage quiet
+    initrd /boot/initramfs
+}
+EOF
+
+echo "[9] Instalacja GRUB BIOS..."
+grub-install --target=i386-pc --boot-directory="$ISO_BUILD/iso/boot" --modules="part_msdos part_gpt" --recheck --force /dev/null
+
+echo "[10] Instalacja GRUB UEFI..."
+mkdir -p "$ISO_BUILD/iso/EFI/BOOT"
+grub-install --target=x86_64-efi --efi-directory="$ISO_BUILD/iso" --boot-directory="$ISO_BUILD/iso/boot" --removable --recheck
+
+echo "[11] Tworzenie pliku isolinux.cfg dla BIOS..."
+mkdir -p "$ISO_BUILD/iso/boot/syslinux"
+cat > "$ISO_BUILD/iso/boot/syslinux/isolinux.cfg" <<EOF
+UI menu.c32
+PROMPT 0
+MENU TITLE Alpine Live Boot Menu
+TIMEOUT 50
+DEFAULT linux
+
+LABEL linux
+    KERNEL /boot/vmlinuz
+    APPEND root=live:CDLABEL=ALPINE_ISO modules=loop,squashfs,sd-mod,usb-storage quiet
+    INITRD /boot/initramfs
+EOF
+
+echo "[12] Tworzenie ISO..."
+xorriso -as mkisofs \
+  -iso-level 3 \
+  -o "$ARTIFACTS_DIR/alpine-live.iso" \
+  -full-iso9660-filenames \
+  -volid "ALPINE_ISO" \
+  -eltorito-boot boot/grub/i386-pc/eltorito.img \
+  -eltorito-catalog boot/grub/boot.cat \
+  -no-emul-boot \
+  -boot-load-size 4 \
+  -boot-info-table \
+  --eltorito-alt-boot \
+  -e boot/efi.img \
+  -no-emul-boot \
+  -isohybrid-gpt-basdat \
+  "$ISO_BUILD/iso"
+
+echo "Gotowe! ISO zapisane w $ARTIFACTS_DIR/alpine-live.iso"
