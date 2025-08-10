@@ -27,7 +27,7 @@ bash
 EOF
 
 mkdir -p ./profiles/$PROFILE_NAME/airootfs/root
-cp "$APP_FILE" ./profiles/$PROFILE_NAME/airootfs/root/
+cp /workspace/app.py ./profiles/$PROFILE_NAME/airootfs/root/
 
 mkdir -p ./profiles/$PROFILE_NAME/airootfs/etc/local.d
 cat > ./profiles/$PROFILE_NAME/airootfs/etc/local.d/app.start <<'EOF'
