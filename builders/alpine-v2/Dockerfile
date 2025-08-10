@@ -1,6 +1,7 @@
+# builders/alpine-v2/Dockerfile
 FROM alpine:3.20
 
-# Install build dependencies
+# Narzędzia potrzebne do mkimage.sh i tworzenia ISO
 RUN apk add --no-cache \
     bash \
     alpine-sdk \
@@ -10,13 +11,11 @@ RUN apk add --no-cache \
     dosfstools \
     mtools \
     wget \
-    python3 \
-    py3-pip
+    syslinux \
+    e2fsprogs \
+    coreutils \
+    findutils
 
 WORKDIR /workspace
 
-# Copy build script and app
-COPY build-my-live.sh /workspace/build-my-live.sh
-COPY app.py /workspace/app.py
-
-RUN chmod +x /workspace/build-my-live.sh
+# Nie kopiujemy plików repo (workflow montuje workspace), ale chmod można wykonać w workflow.
