@@ -1,71 +1,75 @@
 #!/bin/sh
-set -e
+set -euo pipefail
 
-ISO_ROOT="./iso-root"
-APK_VER="v3.20"
+# builders/alpine-v2/build-my-live.sh
+# Tworzy minimalne Alpine Live ISO przy pomocy mkimage.sh
+# - ISO trafia do /workspace/artifacts/alpine/
+# - app.py kopiowany z /workspace/builders/alpine-v2/app.py
 
-echo "[1/6] Przygotowanie struktury rootfs..."
-mkdir -p "$ISO_ROOT/etc/apk/keys"
-mkdir -p "$ISO_ROOT/etc/apk"
+ALPINE_VERSION="v3.20"
+ARCH="x86_64"
+PROFILE="my-python-live"
+OUTDIR="/workspace/artifacts/alpine"
+PROFILES_DIR="./profiles"
 
-echo "[2/6] Kopiowanie kluczy Alpine..."
-cp -r /etc/apk/keys/* "$ISO_ROOT/etc/apk/keys/"
+echo "[0] Working dir: $(pwd)"
+echo "[1] Przygotowanie katalogów..."
+mkdir -p "$OUTDIR"
+mkdir -p "$PROFILES_DIR/$PROFILE/airootfs/root"
 
-echo "[3/6] Konfiguracja repozytoriów..."
-cat > "$ISO_ROOT/etc/apk/repositories" <<EOF
-https://dl-cdn.alpinelinux.org/alpine/${APK_VER}/main
-https://dl-cdn.alpinelinux.org/alpine/${APK_VER}/community
+# Pobierz mkimage.sh jeśli nie ma
+if [ ! -f ./mkimage.sh ]; then
+  echo "[2] Pobieram mkimage.sh..."
+  wget -q -O mkimage.sh "https://gitlab.alpinelinux.org/alpine/mkimage/-/raw/master/mkimage.sh"
+  chmod +x mkimage.sh
+fi
+
+# Utwórz plik packages dla profilu
+echo "[3] Tworzenie listy pakietów profilu..."
+cat > "$PROFILES_DIR/$PROFILE/packages" <<EOF
+alpine-base
+python3
+py3-pip
+bash
+openrc
 EOF
 
-echo "[4/6] Instalacja systemu bazowego i pakietów..."
-apk --root "$ISO_ROOT" --initdb add \
-    alpine-base \
-    python3 \
-    py3-pip \
-    docker \
-    openrc \
-    grub \
-    grub-efi \
-    syslinux \
-    mtools
+# Skopiuj aplikację (jeśli nie ma, utwórz prosty placeholder)
+echo "[4] Kopiowanie app.py do profilu..."
+if [ -f /workspace/builders/alpine-v2/app.py ]; then
+  cp /workspace/builders/alpine-v2/app.py "$PROFILES_DIR/$PROFILE/airootfs/root/"
+else
+  cat > "$PROFILES_DIR/$PROFILE/airootfs/root/app.py" <<'PY'
+print("Hello from Live Python app (placeholder)!")
+PY
+fi
 
-echo "[5/6] Dodawanie aplikacji..."
-mkdir -p "$ISO_ROOT/opt/myapp"
-cp /workspace/builders/alpine-v2/app.py "$ISO_ROOT/opt/myapp/"
-
-cat > "$ISO_ROOT/usr/local/bin/start-myapp.sh" <<'EOF'
+# Dodaj skrypt autostartowy w local.d (OpenRC local service)
+echo "[5] Dodawanie autostartu (local.d)..."
+mkdir -p "$PROFILES_DIR/$PROFILE/airootfs/etc/local.d"
+cat > "$PROFILES_DIR/$PROFILE/airootfs/etc/local.d/start-myapp.start" <<'EOF'
 #!/bin/sh
-echo "Uruchamiam aplikację..."
-python3 /opt/myapp/app.py
+# delay small amount to let system settle
+sleep 1
+echo "Uruchamiam /root/app.py..."
+/usr/bin/python3 /root/app.py
 EOF
-chmod +x "$ISO_ROOT/usr/local/bin/start-myapp.sh"
+chmod +x "$PROFILES_DIR/$PROFILE/airootfs/etc/local.d/start-myapp.start"
 
-# Dodaj do OpenRC, aby uruchamiał się po starcie
-cat > "$ISO_ROOT/etc/local.d/start-myapp.start" <<'EOF'
-#!/bin/sh
-/usr/local/bin/start-myapp.sh
-EOF
-chmod +x "$ISO_ROOT/etc/local.d/start-myapp.start"
+# Upewnij się, że lokalny skrypt zostanie uruchomiony (link w runlevels)
+mkdir -p "$PROFILES_DIR/$PROFILE/airootfs/etc/runlevels/default"
+ln -sf /etc/init.d/local "$PROFILES_DIR/$PROFILE/airootfs/etc/runlevels/default/local" || true
 
-echo "[6/6] Tworzenie obrazu ISO..."
-mkdir -p iso-boot/boot/grub
+# Uruchom mkimage.sh
+echo "[6] Wywołanie mkimage.sh (to może potrwać kilka minut)..."
+./mkimage.sh \
+  --tag "$ALPINE_VERSION" \
+  --arch "$ARCH" \
+  --repository "http://dl-cdn.alpinelinux.org/alpine/$ALPINE_VERSION/main" \
+  --repository "http://dl-cdn.alpinelinux.org/alpine/$ALPINE_VERSION/community" \
+  --outdir "$OUTDIR" \
+  --profile "$PROFILE"
 
-# Konfiguracja GRUB dla BIOS + UEFI
-cat > iso-boot/boot/grub/grub.cfg <<'EOF'
-set timeout=5
-set default=0
-
-menuentry "Alpine Live with MyApp" {
-    linux /boot/vmlinuz-lts root=/dev/ram0 alpine_dev=UUID=xxxxxxx modules=loop,squashfs,sd-mod,usb-storage quiet
-    initrd /boot/initramfs-lts
-}
-EOF
-
-# Kopiowanie kernela i initramfs
-cp "$ISO_ROOT"/boot/vmlinuz-lts iso-boot/boot/
-cp "$ISO_ROOT"/boot/initramfs-lts iso-boot/boot/
-
-# Tworzenie ISO
-grub-mkrescue -o alpine-live.iso iso-boot
-
-echo "Gotowe! Obraz zapisany jako alpine-live.iso"
+echo "[7] Build zakończony. Zawartość katalogu $OUTDIR:"
+ls -lah "$OUTDIR" || true
+echo "Gotowe. Pobierz ISO z artefaktów GitHub Actions (artifacts/alpine/*.iso)"
