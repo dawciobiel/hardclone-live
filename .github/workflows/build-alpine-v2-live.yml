@@ -1,4 +1,3 @@
-# .github/workflows/build-alpine-live.yml
 name: Build Alpine Live ISO
 
 on:
@@ -8,21 +7,19 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Make build script executable
-        run: chmod +x builders/alpine-v2/build-my-live.sh
+      - uses: actions/checkout@v4
 
       - name: Build Docker image
         run: docker build -t alpine-live-builder ./builders/alpine-v2
 
-      - name: Run build inside Docker
-        # montujemy całe repo do /workspace, skrypt odwołuje się do /workspace/builders/alpine-v2/...
+      - name: Make build script executable
+        run: chmod +x ./builders/alpine-v2/build-my-live.sh
+
+      - name: Run build script inside Docker
         run: docker run --rm -v ${{ github.workspace }}:/workspace alpine-live-builder /workspace/builders/alpine-v2/build-my-live.sh
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
           name: alpine-live-iso
-          path: artifacts/alpine/*.iso
+          path: artifacts/alpine/alpine-live.iso
