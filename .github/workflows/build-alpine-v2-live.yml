@@ -13,6 +13,9 @@ jobs:
       - name: Build Docker image
         run: docker build -t alpine-live-builder ./builders/alpine-v2
 
+      - name: Make build script executable
+        run: chmod +x builders/alpine-v2/build-my-live.sh
+
       - name: Run build inside Docker
         run: docker run --rm -v ${{ github.workspace }}:/workspace alpine-live-builder /workspace/builders/alpine-v2/build-my-live.sh
 
