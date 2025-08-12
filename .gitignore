@@ -3,8 +3,17 @@
 # Logs
 logs/
 
-# Output .iso folder
-artifacts/
+# Ignore everything in artifacts/
+artifacts/*
+
+# Allow hardclone folder
+!artifacts/hardclone/
+
+# Allow only specific file types in hardclone
+!artifacts/hardclone/*.iso
+!artifacts/hardclone/*.md5
+!artifacts/hardclone/*.sha512
+
 
 # tools
 scripts/content_of_files.sh
