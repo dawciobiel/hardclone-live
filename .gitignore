@@ -4,15 +4,16 @@
 logs/
 
 # Ignore everything in artifacts/
-artifacts/*
+#artifacts/*
+artifacts/
 
 # Allow hardclone folder
-!artifacts/hardclone/
+# !artifacts/hardclone/
 
 # Allow only specific file types in hardclone
-!artifacts/hardclone/*.iso
-!artifacts/hardclone/*.md5
-!artifacts/hardclone/*.sha512
+# !artifacts/hardclone/*.iso
+# !artifacts/hardclone/*.md5
+# !artifacts/hardclone/*.sha512
 
 
 # tools
