@@ -1,4 +1,4 @@
-## 🚀 Hardclone Live 1.0.0  
+## Hardclone Live 1.0.0  
 
 First stable release of **Hardclone Live** – a complete live environment for disk cloning, imaging, and recovery.  
 
