@@ -102,21 +102,42 @@ cd .. # back to iso-extract
 sed -i 's/Clonezilla live/HardClone Live/g' isolinux/isolinux.cfg 2>/dev/null || true
 sed -i 's/Clonezilla/HardClone/g' boot/grub/grub.cfg 2>/dev/null || true
 
-# Create new ISO
+# Check boot file locations
+echo "Checking boot files..."
+find . -name "isolinux.bin" -type f
+find . -name "efi.img" -type f
+find . -name "*.efi" -type f
+
+# Detect correct paths
+ISOLINUX_BIN=$(find . -name "isolinux.bin" -type f | head -1)
+EFI_IMG=$(find . -name "efi.img" -o -name "*.efi" | head -1)
+
+echo "Found isolinux.bin at: $ISOLINUX_BIN"
+echo "Found EFI image at: $EFI_IMG"
+
+# Create new ISO with detected paths
 echo "Creating new ISO..."
-xorriso -as mkisofs \
-    -r -V "HARDCLONE-LIVE" \
-    -cache-inodes -J -l \
-    -b isolinux/isolinux.bin \
-    -c isolinux/boot.cat \
-    -no-emul-boot \
-    -boot-load-size 4 \
-    -boot-info-table \
-    -eltorito-alt-boot \
-    -e boot/grub/efi.img \
-    -no-emul-boot \
-    -isohybrid-gpt-basdat \
-    -o "../$ISO_NAME" .
+if [ -n "$ISOLINUX_BIN" ] && [ -n "$EFI_IMG" ]; then
+    xorriso -as mkisofs \
+        -r -V "HARDCLONE-LIVE" \
+        -J -l \
+        -b "${ISOLINUX_BIN#./}" \
+        -c isolinux/boot.cat \
+        -no-emul-boot \
+        -boot-load-size 4 \
+        -boot-info-table \
+        -eltorito-alt-boot \
+        -e "${EFI_IMG#./}" \
+        -no-emul-boot \
+        -isohybrid-gpt-basdat \
+        -o "../$ISO_NAME" .
+else
+    echo "Boot files not found, creating basic ISO..."
+    xorriso -as mkisofs \
+        -r -V "HARDCLONE-LIVE" \
+        -J -l \
+        -o "../$ISO_NAME" .
+fi
 
 cd ..
 
