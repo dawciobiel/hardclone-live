@@ -90,6 +90,8 @@ else
     exit 1
 fi
 
+echo "DEBUG: About to create desktop shortcuts"
+
 # Add to startup
 echo "/usr/local/bin/first-boot-setup.sh &" >> squashfs-root/etc/rc.local
 
@@ -138,14 +140,18 @@ Categories=System;
 EOF
 
 chmod +x home/user/Desktop/*.desktop
+echo "DEBUG: Desktop shortcuts created"
 
 # Add to PATH
 echo 'export PATH="/opt/hardclone-cli:/opt/hardclone-gui:$PATH"' >> etc/bash.bashrc
+echo "DEBUG: Added to PATH"
 
 # Create custom branding
 echo "HardClone Live - Custom Clonezilla Distribution" > etc/motd
+echo "DEBUG: Custom branding added"
 
 cd .. # back to live directory
+echo "DEBUG: Changed back to live directory: $(pwd)"
 
 # Repackage filesystem
 echo "Repackaging filesystem..."
