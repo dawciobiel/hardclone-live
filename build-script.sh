@@ -52,6 +52,45 @@ git clone "$HARDCLONE_GUI_REPO" opt/hardclone-gui
 chmod +x opt/hardclone-cli/* 2>/dev/null || true
 chmod +x opt/hardclone-gui/* 2>/dev/null || true
 
+# Install additional packages
+echo "Preparing additional packages..."
+# Create installation script that will run on boot
+cat > squashfs-root/usr/local/bin/first-boot-setup.sh << 'FBEOF'
+#!/bin/bash
+# First boot setup script
+if [ ! -f /var/log/hardclone-setup-done ]; then
+    echo "HardClone: Installing additional packages..."
+    apt update
+    apt install -y python3-pip python3-venv python3-dialog git xxd fish
+    
+    # Mark as done
+    touch /var/log/hardclone-setup-done
+    echo "HardClone: Setup completed"
+fi
+FBEOF
+chmod +x squashfs-root/usr/local/bin/first-boot-setup.sh
+
+# Add to startup
+echo "/usr/local/bin/first-boot-setup.sh &" >> squashfs-root/etc/rc.local
+
+# Configure network to start automatically
+echo "Configuring network..."
+# Create network startup script
+cat > usr/local/bin/network-setup.sh << 'NETEOF'
+#!/bin/bash
+# Auto-start network and update packages
+sleep 5
+dhclient eth0 2>/dev/null || dhclient 2>/dev/null &
+sleep 10
+apt update &
+NETEOF
+chmod +x usr/local/bin/network-setup.sh
+
+# Add to startup (multiple methods for compatibility)
+echo "/usr/local/bin/network-setup.sh &" >> etc/rc.local
+# Also add to bashrc for interactive sessions
+echo "/usr/local/bin/network-setup.sh &" >> etc/bash.bashrc
+
 # Create desktop shortcuts (optional)
 mkdir -p home/user/Desktop
 cat > home/user/Desktop/HardClone-CLI.desktop << 'EOF'
