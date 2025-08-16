@@ -1,6 +1,6 @@
-## Hardclone Live 1.0.0  
+## Hardclone Live UEFI 1.0.0  
 
-First stable release of **Hardclone Live** – a complete live environment for disk cloning, imaging, and recovery.  
+First stable release of **Hardclone Live UEFI** – a complete live environment for disk cloning, imaging, and recovery.  
 
 ---
 
@@ -31,7 +31,7 @@ SHA512:  47dc7d6d36d4539d13b10b080ea55956ebd60c71c10a9647ef6fdcd09330f8c194b7a42
 1. Download the `.iso` file from the link above.  
 2. Download and run [Rufus](https://rufus.ie/).  
 3. Select the downloaded ISO and write it to a USB drive (min. 4 GB).  
-4. Boot your computer from the prepared USB drive.  
+4. Boot your computer in UEFI mode from the prepared USB drive.  
 
 #### 🐧 Linux / macOS  
 1. Download the `.iso` file.  
