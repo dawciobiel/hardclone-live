@@ -1,52 +1,57 @@
-## Hardclone Live UEFI 1.0.0  
+# HardClone Live
 
-First stable release of **Hardclone Live UEFI** – a complete live environment for disk cloning, imaging, and recovery.  
+Custom Clonezilla Live distribution with HardClone CLI and GUI applications for advanced partition backup and cloning operations.
 
----
+## Features
 
-### 📥 Download  
+- Based on Clonezilla Live
+- Supports both BIOS and UEFI boot
+- Includes Python 3.6+ and essential tools (dd, pv)
+- Pre-installed HardClone CLI and GUI applications
+- Automated ISO building via GitHub Actions
 
-[![Download ISO](https://img.shields.io/badge/Download-ISO-blue?style=for-the-badge&logo=google-drive)](https://drive.google.com/file/d/1NnssTo7gUVJM6VxCqbfKNl3sb6-ysn9x/view?usp=sharing)
-[![Checksums](https://img.shields.io/badge/Checksums-md5%20%7C%20sha512-green?style=for-the-badge)](https://github.com/yourusername/yourrepo#checksums)  
+## Applications Included
 
-- **ISO image (~2.8 GB)**: [Google Drive link](https://drive.google.com/file/d/1NnssTo7gUVJM6VxCqbfKNl3sb6-ysn9x/view?usp=sharing)  
-- **MD5 checksum:** [Download `.md5`](https://drive.google.com/file/d/1lW4BBbC7_z-KmNyczitLrCbeGP3o5_Gf/view?usp=sharing)  
-- **SHA512 checksum:** [Download `.sha512`](https://drive.google.com/file/d/1CjzKR5ytDKhSs2IpvC_XpOK4Z_o5AL5n/view?usp=sharing)  
+- **HardClone CLI**: Command-line backup and cloning tool
+- **HardClone GUI**: Graphical interface for backup operations
+- All standard Clonezilla tools and utilities
 
----
+## Building
 
-### 🔑 Checksums  
+The ISO is automatically built using GitHub Actions on every push to the main branch.
+
+### Manual Build (Local)
+
+```bash
+# Build with Docker
+docker build -t clonezilla-builder .
+docker run --rm -v $(pwd):/workspace clonezilla-builder
 ```
 
-MD5:     f815d98deacbdb9ac0ff2d8c5a22afd1
-SHA512:  47dc7d6d36d4539d13b10b080ea55956ebd60c71c10a9647ef6fdcd09330f8c194b7a4298ef5d45449010b8a27eb473041ad2e4a3083858d270228ebf17e172d
+### Build Requirements
 
-````
+- Docker
+- Internet connection (to download Clonezilla and clone repositories)
 
----
+## Download
 
-### 🛠 How to use the ISO  
+Built ISOs are available in the GitHub Actions artifacts or releases section.
 
-#### 💻 Windows  
-1. Download the `.iso` file from the link above.  
-2. Download and run [Rufus](https://rufus.ie/).  
-3. Select the downloaded ISO and write it to a USB drive (min. 4 GB).  
-4. Boot your computer in UEFI mode from the prepared USB drive.  
 
-#### 🐧 Linux / macOS  
-1. Download the `.iso` file.  
-2. Verify the checksums:  
-   ```bash
-   md5sum snapshot-20250812_2135.iso
-   sha512sum snapshot-20250812_2135.iso
-   ```
+## Usage
 
-3. Write the ISO to a USB drive (replace `/dev/sdX` with the correct device):
+1. Download the latest ISO from releases
+2. Create bootable USB/DVD
+3. Boot from the media
+4. Use standard Clonezilla interface or launch HardClone tools:
+   - CLI: Available in PATH as `hardclone`
+   - GUI: Desktop shortcut or run `hardclone-gui`
 
-   ```bash
-   sudo dd if=snapshot-20250812_2135.iso of=/dev/sdX bs=4M status=progress oflag=sync
-   ```
+## Application Sources
 
----
+- CLI: [hardclone-cli](https://github.com/dawciobiel/hardclone-cli)
+- GUI: [hardclone-gui](https://github.com/dawciobiel/hardclone-gui)
 
-💡 **Tip:** You can also run the ISO directly in a virtual machine (VirtualBox, QEMU, VMware, etc.) by selecting it as the boot image.
+## License
+
+This project combines Clonezilla Live with custom applications. Please refer to individual component licenses.

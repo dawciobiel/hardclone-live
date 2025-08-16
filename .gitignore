@@ -2,6 +2,7 @@
 
 # Logs
 logs/
+*.log
 
 # Ignore everything in artifacts/
 #artifacts/*
@@ -19,4 +20,30 @@ artifacts/
 # tools
 scripts/content_of_files.sh
 scripts/content_of_files.log
+
+# ISO files
+*.iso
+
+# Build artifacts
+clonezilla-custom/
+build/
+temp/
+
+# Docker
+.docker/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
 
