@@ -92,9 +92,6 @@ fi
 
 echo "DEBUG: About to create desktop shortcuts"
 
-# Add to startup
-echo "/usr/local/bin/first-boot-setup.sh &" >> squashfs-root/etc/rc.local
-
 # Configure network to start automatically
 echo "Configuring network..."
 # Create network startup script
