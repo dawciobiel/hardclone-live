@@ -28,11 +28,8 @@ wget -O clonezilla-original.iso "$CLONEZILLA_URL"
 
 # Mount and extract ISO
 echo "Extracting Clonezilla ISO..."
-mkdir -p iso-mount iso-extract
-mount -o loop clonezilla-original.iso iso-mount
-cp -r iso-mount/* iso-extract/
-umount iso-mount
-rmdir iso-mount
+mkdir -p iso-extract
+7z x clonezilla-original.iso -oiso-extract
 
 cd iso-extract
 
