@@ -54,6 +54,10 @@ chmod +x opt/hardclone-gui/* 2>/dev/null || true
 
 # Install additional packages
 echo "Preparing additional packages..."
+# Create necessary directories
+mkdir -p squashfs-root/usr/local/bin
+mkdir -p squashfs-root/var/log
+
 # Create installation script that will run on boot
 cat > squashfs-root/usr/local/bin/first-boot-setup.sh << 'FBEOF'
 #!/bin/bash
