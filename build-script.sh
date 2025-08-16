@@ -2,8 +2,10 @@
 
 set -e
 
-# Configuration
-CLONEZILLA_VERSION="3.1.3-22"
+# Configuration - get latest version
+echo "Getting latest Clonezilla version..."
+CLONEZILLA_VERSION=$(curl -s "https://sourceforge.net/projects/clonezilla/files/clonezilla_live_stable/" | grep -o 'href="/projects/clonezilla/files/clonezilla_live_stable/[0-9][^/]*' | head -1 | cut -d'/' -f6)
+echo "Latest version: $CLONEZILLA_VERSION"
 CLONEZILLA_URL="https://sourceforge.net/projects/clonezilla/files/clonezilla_live_stable/${CLONEZILLA_VERSION}/clonezilla-live-${CLONEZILLA_VERSION}-amd64.iso/download"
 WORK_DIR="/workspace"
 ISO_NAME="hardclone-live-$(date +%Y%m%d).iso"
