@@ -54,11 +54,21 @@ chmod +x opt/hardclone-gui/* 2>/dev/null || true
 
 # Install additional packages
 echo "Preparing additional packages..."
+
+# Debug FIRST
+echo "=== EARLY DEBUG ==="
+echo "Current directory: $(pwd)"
+echo "Checking squashfs-root exists:"
+ls -ld squashfs-root 2>/dev/null || echo "squashfs-root NOT FOUND!"
+
 # Create necessary directories
-mkdir -p squashfs-root/usr/local/bin
-mkdir -p squashfs-root/var/log
+echo "Creating directories..."
+mkdir -p squashfs-root/usr/local/bin || { echo "Failed to create usr/local/bin"; exit 1; }
+mkdir -p squashfs-root/var/log || { echo "Failed to create var/log"; exit 1; }
+echo "Directories created successfully"
 
 # Create installation script that will run on boot
+echo "Creating first-boot-setup.sh..."
 cat > squashfs-root/usr/local/bin/first-boot-setup.sh << 'FBEOF'
 #!/bin/bash
 # First boot setup script
@@ -72,7 +82,14 @@ if [ ! -f /var/log/hardclone-setup-done ]; then
     echo "HardClone: Setup completed"
 fi
 FBEOF
-chmod +x squashfs-root/usr/local/bin/first-boot-setup.sh
+
+if [ $? -eq 0 ]; then
+    chmod +x squashfs-root/usr/local/bin/first-boot-setup.sh
+    echo "first-boot-setup.sh created successfully"
+else
+    echo "ERROR: Failed to create first-boot-setup.sh"
+    exit 1
+fi
 
 # Add to startup
 echo "/usr/local/bin/first-boot-setup.sh &" >> squashfs-root/etc/rc.local
