@@ -58,18 +58,17 @@ echo "Preparing additional packages..."
 # Debug FIRST
 echo "=== EARLY DEBUG ==="
 echo "Current directory: $(pwd)"
-echo "Checking squashfs-root exists:"
-ls -ld squashfs-root 2>/dev/null || echo "squashfs-root NOT FOUND!"
 
+# We're already inside squashfs-root, so use relative paths
 # Create necessary directories
 echo "Creating directories..."
-mkdir -p squashfs-root/usr/local/bin || { echo "Failed to create usr/local/bin"; exit 1; }
-mkdir -p squashfs-root/var/log || { echo "Failed to create var/log"; exit 1; }
+mkdir -p usr/local/bin || { echo "Failed to create usr/local/bin"; exit 1; }
+mkdir -p var/log || { echo "Failed to create var/log"; exit 1; }
 echo "Directories created successfully"
 
 # Create installation script that will run on boot
 echo "Creating first-boot-setup.sh..."
-cat > squashfs-root/usr/local/bin/first-boot-setup.sh << 'FBEOF'
+cat > usr/local/bin/first-boot-setup.sh << 'FBEOF'
 #!/bin/bash
 # First boot setup script
 if [ ! -f /var/log/hardclone-setup-done ]; then
@@ -84,7 +83,7 @@ fi
 FBEOF
 
 if [ $? -eq 0 ]; then
-    chmod +x squashfs-root/usr/local/bin/first-boot-setup.sh
+    chmod +x usr/local/bin/first-boot-setup.sh
     echo "first-boot-setup.sh created successfully"
 else
     echo "ERROR: Failed to create first-boot-setup.sh"
