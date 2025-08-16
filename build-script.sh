@@ -29,9 +29,9 @@ wget -O clonezilla-original.iso "$CLONEZILLA_URL"
 # Mount and extract ISO
 echo "Extracting Clonezilla ISO..."
 mkdir -p iso-mount iso-extract
-sudo mount -o loop clonezilla-original.iso iso-mount
+mount -o loop clonezilla-original.iso iso-mount
 cp -r iso-mount/* iso-extract/
-sudo umount iso-mount
+umount iso-mount
 rmdir iso-mount
 
 cd iso-extract
@@ -39,7 +39,7 @@ cd iso-extract
 # Extract squashfs filesystem
 echo "Extracting filesystem..."
 cd live
-sudo unsquashfs filesystem.squashfs
+unsquashfs filesystem.squashfs
 
 # Clone your applications
 echo "Downloading HardClone applications..."
@@ -52,8 +52,8 @@ git clone "$HARDCLONE_CLI_REPO" opt/hardclone-cli
 git clone "$HARDCLONE_GUI_REPO" opt/hardclone-gui
 
 # Make applications executable
-sudo chmod +x opt/hardclone-cli/* 2>/dev/null || true
-sudo chmod +x opt/hardclone-gui/* 2>/dev/null || true
+chmod +x opt/hardclone-cli/* 2>/dev/null || true
+chmod +x opt/hardclone-gui/* 2>/dev/null || true
 
 # Create desktop shortcuts (optional)
 mkdir -p home/user/Desktop
@@ -93,11 +93,11 @@ cd .. # back to live directory
 
 # Repackage filesystem
 echo "Repackaging filesystem..."
-sudo rm filesystem.squashfs
-sudo mksquashfs squashfs-root filesystem.squashfs -comp xz -Xbcj x86
+rm filesystem.squashfs
+mksquashfs squashfs-root filesystem.squashfs -comp xz -Xbcj x86
 
 # Clean up
-sudo rm -rf squashfs-root
+rm -rf squashfs-root
 
 cd .. # back to iso-extract
 
@@ -107,7 +107,7 @@ sed -i 's/Clonezilla/HardClone/g' boot/grub/grub.cfg 2>/dev/null || true
 
 # Create new ISO
 echo "Creating new ISO..."
-sudo xorriso -as mkisofs \
+xorriso -as mkisofs \
     -r -V "HARDCLONE-LIVE" \
     -cache-inodes -J -l \
     -b isolinux/isolinux.bin \
